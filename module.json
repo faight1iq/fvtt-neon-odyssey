@@ -1,0 +1,152 @@
+{
+  "id": "fvtt-neon-odyssey",
+  "title": "Foundry VTT Neon Odyssey -by Faight",
+  "description": "A custom Foundry VTT Port for Neon Odyssey",
+  "version": "260921.14.45",
+  "compatibility": {
+    "minimum": "1",
+    "verified": "13.351",
+    "maximum": "99"
+  },
+  "authors": [
+    {
+      "name": "faight1iq",
+      "url": "https://github.com/faight1iq/fvtt-neon-odyssey"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {}
+      }
+    ],
+    "requires": [
+      {
+        "id": "monks-active-tiles",
+        "type": "module"
+      },
+      {
+        "id": "token-attacher",
+        "type": "module"
+      },
+      {
+        "id": "betterroofs",
+        "type": "module"
+      },
+      {
+        "id": "fxmaster",
+        "type": "module"
+      },
+      {
+        "id": "tile-scroll",
+        "type": "module"
+      },
+      {
+        "id": "tokenmagic",
+        "type": "module"
+      },
+      {
+        "id": "tagger",
+        "type": "module"
+      }
+    ]
+  },
+  "packs": [
+    {
+      "label": "Foundry VTT Neon Odyssey -by Faight",
+      "type": "Adventure",
+      "name": "fvtt-neon-odyssey",
+      "path": "packs/fvtt-neon-odyssey",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Actors",
+      "type": "Actor",
+      "name": "actors",
+      "path": "packs/actors",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Journals",
+      "type": "JournalEntry",
+      "name": "journals",
+      "path": "packs/journals",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Items",
+      "type": "Item",
+      "name": "items",
+      "path": "packs/items",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Playlists",
+      "type": "Playlist",
+      "name": "playlists",
+      "path": "packs/playlists",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Scenes",
+      "type": "Scene",
+      "name": "scenes",
+      "path": "packs/scenes",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    }
+  ],
+  "packFolders": [
+    {
+      "name": "Foundry VTT Neon Odyssey -by Faight",
+      "sorting": "m",
+      "packs": [
+        "fvtt-neon-odyssey",
+        "actors",
+        "items",
+        "journals",
+        "scenes",
+        "playlists"
+      ]
+    }
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "url": "https://github.com/faight1iq/fvtt-neon-odyssey"
+}
