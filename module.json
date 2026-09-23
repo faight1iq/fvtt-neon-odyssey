@@ -2,7 +2,7 @@
   "id": "fvtt-neon-odyssey",
   "title": "Foundry VTT Neon Odyssey -by Faight",
   "description": "A custom Foundry VTT Port for Neon Odyssey",
-  "version": "260921.14.45",
+  "version": "260923.15.46",
   "compatibility": {
     "minimum": "1",
     "verified": "13.351",
@@ -21,44 +21,98 @@
         "type": "system",
         "compatibility": {}
       }
-    ],
-    "requires": [
-      {
-        "id": "monks-active-tiles",
-        "type": "module"
-      },
-      {
-        "id": "token-attacher",
-        "type": "module"
-      },
-      {
-        "id": "betterroofs",
-        "type": "module"
-      },
-      {
-        "id": "fxmaster",
-        "type": "module"
-      },
-      {
-        "id": "tile-scroll",
-        "type": "module"
-      },
-      {
-        "id": "tokenmagic",
-        "type": "module"
-      },
-      {
-        "id": "tagger",
-        "type": "module"
-      }
     ]
   },
   "packs": [
     {
-      "label": "Foundry VTT Neon Odyssey -by Faight",
-      "type": "Adventure",
-      "name": "fvtt-neon-odyssey",
-      "path": "packs/fvtt-neon-odyssey",
+      "label": "Rules",
+      "type": "JournalEntry",
+      "name": "rules",
+      "path": "packs/rules",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Character Classes",
+      "type": "Item",
+      "name": "classes",
+      "path": "packs/classes",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Class Features",
+      "type": "Item",
+      "name": "class-features",
+      "path": "packs/class-features",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Character Origins",
+      "type": "Item",
+      "name": "origins",
+      "path": "packs/origins",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Feats",
+      "type": "Item",
+      "name": "feats",
+      "path": "packs/feats",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Spells",
+      "type": "Item",
+      "name": "spells",
+      "path": "packs/spells",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Equipment",
+      "type": "Item",
+      "name": "equipment",
+      "path": "packs/equipment",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
+    },
+    {
+      "label": "Roll Tables",
+      "type": "RollTable",
+      "name": "tables",
+      "path": "packs/tables",
       "system": "dnd5e",
       "ownership": {
         "PLAYER": "OBSERVER",
@@ -79,46 +133,10 @@
       "flags": {}
     },
     {
-      "label": "Journals",
-      "type": "JournalEntry",
-      "name": "journals",
-      "path": "packs/journals",
-      "system": "dnd5e",
-      "ownership": {
-        "PLAYER": "OBSERVER",
-        "ASSISTANT": "OWNER"
-      },
-      "flags": {}
-    },
-    {
-      "label": "Items",
+      "label": "Monster Features",
       "type": "Item",
-      "name": "items",
-      "path": "packs/items",
-      "system": "dnd5e",
-      "ownership": {
-        "PLAYER": "OBSERVER",
-        "ASSISTANT": "OWNER"
-      },
-      "flags": {}
-    },
-    {
-      "label": "Playlists",
-      "type": "Playlist",
-      "name": "playlists",
-      "path": "packs/playlists",
-      "system": "dnd5e",
-      "ownership": {
-        "PLAYER": "OBSERVER",
-        "ASSISTANT": "OWNER"
-      },
-      "flags": {}
-    },
-    {
-      "label": "Scenes",
-      "type": "Scene",
-      "name": "scenes",
-      "path": "packs/scenes",
+      "name": "monster-features",
+      "path": "packs/monster-features",
       "system": "dnd5e",
       "ownership": {
         "PLAYER": "OBSERVER",
@@ -129,15 +147,19 @@
   ],
   "packFolders": [
     {
-      "name": "Foundry VTT Neon Odyssey -by Faight",
+      "name": "Neon Odyssey",
       "sorting": "m",
       "packs": [
-        "fvtt-neon-odyssey",
+        "rules",
+        "classes",
+        "class-features",
+        "origins",
+        "feats",
+        "spells",
+        "equipment",
+        "tables",
         "actors",
-        "items",
-        "journals",
-        "scenes",
-        "playlists"
+        "monster-features"
       ]
     }
   ],
@@ -148,5 +170,9 @@
       "path": "lang/en.json"
     }
   ],
-  "url": "https://github.com/faight1iq/fvtt-neon-odyssey"
+  "url": "https://github.com/faight1iq/fvtt-neon-odyssey",
+  "esmodules": [
+    "scripts/register-weapons.mjs",
+    "scripts/register-tools.mjs"
+  ]
 }
