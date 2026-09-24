@@ -2,7 +2,7 @@
   "id": "fvtt-neon-odyssey",
   "title": "Foundry VTT Neon Odyssey -by Faight",
   "description": "A custom Foundry VTT Port for Neon Odyssey",
-  "version": "260923.18.31",
+  "version": "260923.23.40",
   "compatibility": {
     "minimum": "1",
     "verified": "13.351",
