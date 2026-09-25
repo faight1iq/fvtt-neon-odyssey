@@ -1,22 +1,8 @@
-2026/09/23-20:08:58.612 e08 Recovering log #192
-2026/09/23-20:08:58.751 e08 Delete type=0 #192
-2026/09/23-20:08:58.754 e08 Delete type=3 #191
-2026/09/23-20:15:24.454 6648 Level-0 table #196: started
-2026/09/23-20:15:24.454 6648 Level-0 table #196: 0 bytes OK
-2026/09/23-20:15:24.476 6648 Delete type=0 #194
-2026/09/23-20:15:24.542 6648 Manual compaction at level-0 from '!folders!1d197a49b3a77e37' @ 72057594037927935 : 1 .. '!items!fb582bb9d8f6305c' @ 0 : 0; will stop at '!items!fb582bb9d8f6305c' @ 117 : 1
-2026/09/23-20:15:24.542 6648 Compacting 2@0 + 0@1 files
-2026/09/23-20:15:24.627 6648 Generated table #197@0: 27 keys, 31324 bytes
-2026/09/23-20:15:24.627 6648 Compacted 2@0 + 0@1 files => 31324 bytes
-2026/09/23-20:15:24.640 6648 compacted to: files[ 0 1 1 0 0 0 0 ]
-2026/09/23-20:15:24.641 6648 Delete type=2 #178
-2026/09/23-20:15:24.648 6648 Delete type=2 #187
-2026/09/23-20:15:24.885 6648 Manual compaction at level-0 from '!items!fb582bb9d8f6305c' @ 117 : 1 .. '!items!fb582bb9d8f6305c' @ 0 : 0; will stop at (end)
-2026/09/23-20:15:25.063 6648 Manual compaction at level-1 from '!folders!1d197a49b3a77e37' @ 72057594037927935 : 1 .. '!items!fb582bb9d8f6305c' @ 0 : 0; will stop at '!items!fb582bb9d8f6305c' @ 117 : 1
-2026/09/23-20:15:25.063 6648 Compacting 1@1 + 1@2 files
-2026/09/23-20:15:25.130 6648 Generated table #198@1: 78 keys, 111138 bytes
-2026/09/23-20:15:25.130 6648 Compacted 1@1 + 1@2 files => 111138 bytes
-2026/09/23-20:15:25.152 6648 compacted to: files[ 0 0 1 0 0 0 0 ]
-2026/09/23-20:15:25.152 6648 Delete type=2 #154
-2026/09/23-20:15:25.156 6648 Delete type=2 #197
-2026/09/23-20:15:25.334 6648 Manual compaction at level-1 from '!items!fb582bb9d8f6305c' @ 117 : 1 .. '!items!fb582bb9d8f6305c' @ 0 : 0; will stop at (end)
+2026/09/25-09:55:31.806 65f4 Recovering log #201
+2026/09/25-09:55:31.936 65f4 Delete type=3 #199
+2026/09/25-09:55:31.938 65f4 Delete type=0 #201
+2026/09/25-09:55:38.559 1f80 Level-0 table #206: started
+2026/09/25-09:55:38.559 1f80 Level-0 table #206: 0 bytes OK
+2026/09/25-09:55:38.571 1f80 Delete type=0 #204
+2026/09/25-09:55:38.611 1f80 Manual compaction at level-0 from '!folders!1d197a49b3a77e37' @ 72057594037927935 : 1 .. '!items!fb582bb9d8f6305c' @ 0 : 0; will stop at (end)
+2026/09/25-09:55:38.611 1f80 Manual compaction at level-1 from '!folders!1d197a49b3a77e37' @ 72057594037927935 : 1 .. '!items!fb582bb9d8f6305c' @ 0 : 0; will stop at (end)
