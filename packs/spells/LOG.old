@@ -1,8 +1,8 @@
-2026/09/23-21:00:50.575 6300 Recovering log #149
-2026/09/23-21:00:50.678 6300 Delete type=3 #147
-2026/09/23-21:00:50.678 6300 Delete type=0 #149
-2026/09/23-21:01:39.977 48c Level-0 table #154: started
-2026/09/23-21:01:39.977 48c Level-0 table #154: 0 bytes OK
-2026/09/23-21:01:40.000 48c Delete type=0 #152
-2026/09/23-21:01:40.004 48c Manual compaction at level-0 from '!folders!NOspCantrips0000' @ 72057594037927935 : 1 .. '!items!WitheringLightni' @ 0 : 0; will stop at (end)
-2026/09/23-21:01:40.004 48c Manual compaction at level-1 from '!folders!NOspCantrips0000' @ 72057594037927935 : 1 .. '!items!WitheringLightni' @ 0 : 0; will stop at (end)
+2026/09/27-14:17:30.265 75c8 Recovering log #177
+2026/09/27-14:17:30.351 75c8 Delete type=3 #175
+2026/09/27-14:17:30.352 75c8 Delete type=0 #177
+2026/09/27-14:32:08.236 76f4 Level-0 table #182: started
+2026/09/27-14:32:08.251 76f4 Level-0 table #182: 0 bytes OK
+2026/09/27-14:32:08.301 76f4 Delete type=0 #180
+2026/09/27-14:32:08.355 76f4 Manual compaction at level-0 from '!folders!NOspCantrips0000' @ 72057594037927935 : 1 .. '!items!WitheringLightni' @ 0 : 0; will stop at (end)
+2026/09/27-14:32:08.355 76f4 Manual compaction at level-1 from '!folders!NOspCantrips0000' @ 72057594037927935 : 1 .. '!items!WitheringLightni' @ 0 : 0; will stop at (end)

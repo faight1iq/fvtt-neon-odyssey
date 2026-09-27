@@ -1,0 +1,190 @@
+<div class="no-ss">
+{{#if editing}}
+  {{!-- ============================== EDIT MODE ============================== --}}
+  <header class="no-ss-hdr">
+    <input class="e-name" type="text" name="name" value="{{name}}" placeholder="Name">
+    <span class="e-price">
+      <input type="number" name="system.attributes.price.value" value="{{src.attributes.price.value}}" placeholder="Price">
+      <select name="system.attributes.price.denomination">{{selectOptions currencyChoices selected=src.attributes.price.denomination}}</select>
+    </span>
+  </header>
+  <div class="e-row">
+    <select name="system.traits.size" data-tooltip="Size">{{selectOptions sizeChoices selected=src.traits.size}}</select>
+    <input class="grow" type="text" name="flags.fvtt-neon-odyssey.descriptor" value="{{flags.descriptor}}"
+      placeholder="Light, Titanium, Antimatter-Powered, Graviton Starship Of Terra Design">
+  </div>
+  <div class="e-row">
+    <label>Weight</label><input class="n" type="number" name="system.traits.weight.value" value="{{src.traits.weight.value}}">
+    <select name="system.traits.weight.units">{{selectOptions weightChoices selected=src.traits.weight.units}}</select>
+    <label>Keel</label><input class="n" type="number" name="system.traits.keel.value" value="{{src.traits.keel.value}}">
+    <label>Beam</label><input class="n" type="number" name="system.traits.beam.value" value="{{src.traits.beam.value}}">
+    <label>Draft</label><input class="n" type="number" name="flags.fvtt-neon-odyssey.draft" value="{{flags.draft}}">
+  </div>
+  <div class="e-row">
+    <label>Landing</label><input class="grow" type="text" name="flags.fvtt-neon-odyssey.landing" value="{{flags.landing}}" placeholder="Land, Water">
+  </div>
+  <div class="e-row">
+    <label>Built By</label><input class="grow" type="text" name="flags.fvtt-neon-odyssey.design.builtBy" value="{{design.builtBy}}" placeholder="Terra">
+    <label>Used By</label><input class="grow" type="text" name="flags.fvtt-neon-odyssey.design.usedBy" value="{{design.usedBy}}">
+    <label>Cargo</label><input class="n" type="number" min="0" name="flags.fvtt-neon-odyssey.design.cargo" value="{{design.cargo}}" data-tooltip="5-ft squares">
+  </div>
+
+  <div class="no-ss-rule"></div>
+  <section class="no-ss-design">
+    <div class="no-ss-sec">Design
+      <span class="hint">Drop Starship Components here{{#if designed}} ·
+        <span class="{{#if powerNegative}}neg{{/if}}">Power Surplus {{powerSurplus}}</span>
+        <a data-action="recalculate" data-tooltip="Recalculate"><i class="fa-solid fa-rotate"></i></a>{{/if}}</span>
+    </div>
+    <div class="slots">
+      {{#each slots}}
+      <div class="slot"><span class="sl">{{label}}</span>
+        {{#each installed}}
+        <span class="part" data-item-id="{{id}}">{{name}}
+          {{#if ../stack}}<input class="n q" type="number" min="1" value="{{qty}}" data-item-field="system.quantity" data-tooltip="Quantity">{{/if}}
+          <a data-action="deleteItem" data-tooltip="Remove"><i class="fa-solid fa-xmark"></i></a></span>
+        {{/each}}
+        {{#if open}}<span class="empty">—</span>{{/if}}
+      </div>
+      {{/each}}
+    </div>
+  </section>
+
+  <div class="no-ss-rule"></div>
+  {{#if designed}}
+  <div class="no-ss-stats">
+    <div class="l">Crew</div><div class="v">{{crewLabel}} <span class="sub">+ pax</span>
+      <input class="n" type="number" name="system.passengers.max" value="{{src.passengers.max}}" data-tooltip="Passengers"></div>
+    <div class="l">Cargo</div><div class="v">{{cargo}}</div>
+    <div class="l">Armor Class</div><div class="v full">{{ac}}</div>
+    <div class="l">Hit Points</div><div class="v full">
+      <input class="n" type="number" name="system.attributes.hp.value" value="{{src.attributes.hp.value}}"> / {{hp.max}}
+      <span class="sub">(damage threshold {{hp.dt}})</span></div>
+    <div class="l">Mishap Threshold</div><div class="v full">{{mt}}</div>
+    <div class="l">Speed</div><div class="v full">{{speed}} <span class="sub">· calculated from components</span></div>
+  </div>
+  {{else}}
+  <div class="no-ss-stats edit">
+    <div class="l">Crew</div>
+    <div class="v"><input class="n" type="number" name="system.crew.max" value="{{src.crew.max}}" data-tooltip="Fully manned">
+      <span class="sub">+</span>
+      <input class="n" type="number" name="system.passengers.max" value="{{src.passengers.max}}" data-tooltip="Passengers"></div>
+    <div class="l">Cargo</div>
+    <div class="v"><input class="n" type="number" name="flags.fvtt-neon-odyssey.cargoSqft" value="{{flags.cargoSqft}}"> <span class="sub">sqft</span></div>
+    <div class="l">Armor Class</div>
+    <div class="v full"><input class="n" type="number" name="system.attributes.ac.flat" value="{{src.attributes.ac.flat}}"></div>
+    <div class="l">Hit Points</div>
+    <div class="v full"><input class="n" type="number" name="system.attributes.hp.value" value="{{src.attributes.hp.value}}">
+      <span class="sub">/</span>
+      <input class="n" type="number" name="system.attributes.hp.max" value="{{src.attributes.hp.max}}">
+      <span class="sub">threshold</span>
+      <input class="n" type="number" name="system.attributes.hp.dt" value="{{src.attributes.hp.dt}}"></div>
+    <div class="l">Mishap Threshold</div>
+    <div class="v full"><input class="n" type="number" name="system.attributes.hp.mt" value="{{src.attributes.hp.mt}}"></div>
+    <div class="l">Speed</div>
+    <div class="v full e-move">
+      {{#each movement}}<label>{{label}}</label><input class="n" type="number" name="system.attributes.movement.{{key}}" value="{{value}}">{{/each}}
+    </div>
+  </div>
+  {{/if}}
+
+  <div class="no-ss-rule"></div>
+  <div class="no-ss-abil">
+    {{#each abilities}}
+    {{#if @root.designed}}<div><div class="k">{{abbr}}</div><div class="n">{{value}}</div></div>
+    {{else}}<div><div class="k">{{abbr}}</div><input class="n" type="number" name="system.abilities.{{key}}.value" value="{{raw}}"></div>{{/if}}
+    {{/each}}
+  </div>
+
+{{else}}
+  {{!-- ============================== VIEW MODE ============================== --}}
+  <header class="no-ss-hdr">
+    <h1>{{name}}</h1>
+    {{#if priceLabel}}<div class="no-ss-price">{{priceLabel}}</div>{{/if}}
+  </header>
+  <div class="no-ss-desc">
+    {{#if line1}}<div>{{line1}}</div>{{/if}}
+    {{#if line2}}<div>{{line2}}</div>{{/if}}
+  </div>
+
+  <div class="no-ss-rule"></div>
+  <div class="no-ss-stats">
+    <div class="l">Crew</div><div class="v">{{crewLabel}}</div>
+    <div class="l">Cargo</div><div class="v">{{cargo}}</div>
+    <div class="l">Armor Class</div><div class="v full">{{ac}}</div>
+    <div class="l">Hit Points</div>
+    <div class="v full">{{hp.value}} / {{hp.max}}{{#if hp.dt}} <span class="sub">(damage threshold {{hp.dt}})</span>{{/if}}</div>
+    <div class="l">Mishap Threshold</div><div class="v full">{{mt}}</div>
+    <div class="l">Speed</div><div class="v full">{{speed}}</div>
+  </div>
+
+  <div class="no-ss-rule"></div>
+  <div class="no-ss-abil">
+    {{#each abilities}}
+    <div><div class="k">{{abbr}}</div><div class="n">{{value}}</div><div class="m">{{mod}}</div></div>
+    {{/each}}
+  </div>
+{{/if}}
+
+  {{!-- ============================== BOTH MODES ============================== --}}
+  <div class="no-ss-rule"></div>
+  <section class="mishap-zone">
+    <div class="no-ss-sec">Possible Mishaps ({{mishaps.length}})
+      {{#if editing}}<span class="hint">Drop Mishap actors here to add</span>
+      {{else if isGM}}<span class="hint">Drag onto a ship system</span>{{/if}}
+    </div>
+    <div class="no-ss-chips">
+      {{#each mishaps}}
+      <span class="mishap-chip {{#if missing}}missing{{/if}}" data-uuid="{{uuid}}" data-action="openMishap"
+        {{#if @root.isGM}}{{#if uuid}}draggable="true"{{/if}}{{/if}}>{{name}}{{#if @root.editing}}{{#if manual}}<a class="rm" data-action="removeMishap" data-tooltip="Remove"><i class="fa-solid fa-xmark"></i></a>{{/if}}{{/if}}</span>
+      {{else}}
+      <span class="empty">None</span>
+      {{/each}}
+    </div>
+  </section>
+
+  <div class="no-ss-rule"></div>
+  <section>
+    <div class="no-ss-sec">Weapon Stations
+      <span class="hint">{{#if editing}}Drop weapon items here to add{{else}}Click to fire{{/if}}</span>
+    </div>
+    {{#each weapons}}
+    {{#if @root.editing}}
+    <div class="no-ss-weap edit" data-item-id="{{id}}">
+      <input class="n qty-in" type="number" min="0" value="{{qty}}" data-item-field="system.quantity" data-tooltip="Quantity">
+      <div class="wbody">
+        <div class="wname">{{name}}</div>
+        <div class="e-row tight">
+          <label>Crew</label><input class="n" type="number" min="0" value="{{crew}}" data-item-field="flags.fvtt-neon-odyssey.crew">
+          <label>Range</label>
+          <select data-item-field="flags.fvtt-neon-odyssey.rangeBand">
+            <option value="" {{#unless rangeBand}}selected{{/unless}}>(item range)</option>
+            {{#each @root.rangeBands}}<option value="{{this}}" {{#if (eq this ../rangeBand)}}selected{{/if}}>{{this}}</option>{{/each}}
+          </select>
+        </div>
+      </div>
+      <div class="btns">
+        <a data-action="openItem" data-tooltip="Edit weapon"><i class="fa-solid fa-pen-to-square"></i></a>
+        <a data-action="deleteItem" data-tooltip="Delete weapon"><i class="fa-solid fa-trash"></i></a>
+      </div>
+    </div>
+    {{else}}
+    <div class="no-ss-weap" data-item-id="{{id}}" data-action="useWeapon">
+      <div class="qty">{{qty}}</div>
+      <div class="wbody">
+        <div class="wname">{{name}}{{#if crew}} <span class="crew">({{crew}} Crew)</span>{{/if}}</div>
+        <div class="wline">{{line}}</div>
+      </div>
+      {{#if hasAttack}}
+      <div class="btns">
+        <button type="button" data-action="rollAttack">Attack</button>
+        <button type="button" data-action="rollDamage">Damage</button>
+      </div>
+      {{/if}}
+    </div>
+    {{/if}}
+    {{else}}
+    <div class="empty">No weapons</div>
+    {{/each}}
+  </section>
+</div>
