@@ -2,7 +2,7 @@
   "id": "fvtt-neon-odyssey",
   "title": "Foundry VTT Neon Odyssey -by Faight",
   "description": "A custom Foundry VTT Port for Neon Odyssey",
-  "version": "260927.14.31",
+  "version": "260927.18.43",
   "compatibility": {
     "minimum": "1",
     "verified": "13.351",
@@ -155,6 +155,17 @@
         "ASSISTANT": "OWNER"
       },
       "flags": {}
+    },
+    {
+      "label": "Scenes",
+      "type": "Scene",
+      "name": "scenes",
+      "path": "packs/scenes",
+      "ownership": {
+        "PLAYER": "NONE",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
     }
   ],
   "packFolders": [
@@ -172,7 +183,8 @@
         "tables",
         "actors",
         "monster-features",
-        "starship-components"
+        "starship-components",
+        "scenes"
       ]
     }
   ],

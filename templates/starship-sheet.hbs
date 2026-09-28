@@ -13,6 +13,7 @@
     <input class="grow" type="text" name="flags.fvtt-neon-odyssey.descriptor" value="{{flags.descriptor}}"
       placeholder="Light, Titanium, Antimatter-Powered, Graviton Starship Of Terra Design">
   </div>
+  {{#unless designed}}
   <div class="e-row">
     <label>Weight</label><input class="n" type="number" name="system.traits.weight.value" value="{{src.traits.weight.value}}">
     <select name="system.traits.weight.units">{{selectOptions weightChoices selected=src.traits.weight.units}}</select>
@@ -20,6 +21,7 @@
     <label>Beam</label><input class="n" type="number" name="system.traits.beam.value" value="{{src.traits.beam.value}}">
     <label>Draft</label><input class="n" type="number" name="flags.fvtt-neon-odyssey.draft" value="{{flags.draft}}">
   </div>
+  {{/unless}}
   <div class="e-row">
     <label>Landing</label><input class="grow" type="text" name="flags.fvtt-neon-odyssey.landing" value="{{flags.landing}}" placeholder="Land, Water">
   </div>
@@ -36,6 +38,14 @@
         <span class="{{#if powerNegative}}neg{{/if}}">Power Surplus {{powerSurplus}}</span>
         <a data-action="recalculate" data-tooltip="Recalculate"><i class="fa-solid fa-rotate"></i></a>{{/if}}</span>
     </div>
+    <div class="e-row dims">
+      <label>Keel</label><input class="n" type="number" min="0" name="system.traits.keel.value" value="{{src.traits.keel.value}}" data-tooltip="Length (ft)">
+      <label>Beam</label><input class="n" type="number" min="0" name="system.traits.beam.value" value="{{src.traits.beam.value}}" data-tooltip="Width (ft)">
+      <label>Draft</label><input class="n" type="number" min="0" name="flags.fvtt-neon-odyssey.draft" value="{{flags.draft}}" data-tooltip="Height (ft)">
+      {{#if designed}}<span class="sub">= {{tonsLabel}}, {{sizeName}}</span>{{/if}}
+    </div>
+    {{#if designed}}{{#if missingDims}}<div class="no-ss-warn"><i class="fa-solid fa-triangle-exclamation"></i> Enter keel, beam and draft. Tonnage, size, HP, damage threshold and cost all come from them.</div>{{/if}}
+    {{#if missingBuilder}}<div class="no-ss-warn"><i class="fa-solid fa-triangle-exclamation"></i> Enter Built By for the description.</div>{{/if}}{{/if}}
     <div class="slots">
       {{#each slots}}
       <div class="slot"><span class="sl">{{label}}</span>
@@ -44,7 +54,7 @@
           {{#if ../stack}}<input class="n q" type="number" min="1" value="{{qty}}" data-item-field="system.quantity" data-tooltip="Quantity">{{/if}}
           <a data-action="deleteItem" data-tooltip="Remove"><i class="fa-solid fa-xmark"></i></a></span>
         {{/each}}
-        {{#if open}}<span class="empty">—</span>{{/if}}
+        {{#if open}}<span class="drop">Drop {{#if hint}}{{hint}}{{else}}{{label}}{{/if}} here</span>{{/if}}
       </div>
       {{/each}}
     </div>
@@ -153,7 +163,7 @@
     <div class="no-ss-weap edit" data-item-id="{{id}}">
       <input class="n qty-in" type="number" min="0" value="{{qty}}" data-item-field="system.quantity" data-tooltip="Quantity">
       <div class="wbody">
-        <div class="wname">{{name}}</div>
+        <div class="wname">{{name}}{{#if power}} <span class="pwr" data-tooltip="Power required"><i class="fa-solid fa-bolt"></i> {{power}}{{#if multi}} each · {{powerTotal}} total{{/if}}</span>{{/if}}</div>
         <div class="e-row tight">
           <label>Crew</label><input class="n" type="number" min="0" value="{{crew}}" data-item-field="flags.fvtt-neon-odyssey.crew">
           <label>Range</label>
@@ -172,7 +182,8 @@
     <div class="no-ss-weap" data-item-id="{{id}}" data-action="useWeapon">
       <div class="qty">{{qty}}</div>
       <div class="wbody">
-        <div class="wname">{{name}}{{#if crew}} <span class="crew">({{crew}} Crew)</span>{{/if}}</div>
+        <div class="wname">{{name}}{{#if crew}} <span class="crew">({{crew}} Crew)</span>{{/if}}
+          {{#if power}}<span class="pwr" data-tooltip="Power required"><i class="fa-solid fa-bolt"></i> {{power}}{{#if multi}} each · {{powerTotal}} total{{/if}}</span>{{/if}}</div>
         <div class="wline">{{line}}</div>
       </div>
       {{#if hasAttack}}

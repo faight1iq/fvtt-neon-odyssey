@@ -6,7 +6,7 @@
 //               cargoSqft (number), mishaps (array of Actor UUIDs)
 // Weapon flags: crew (number), rangeBand (string: Point Blank | Short | Medium | Long | Extreme)
 
-import { SLOTS, isDesigned, getParts, addComponent, recalculate } from "./starship-designer.mjs";
+import { SLOTS, slotOf, isDesigned, getParts, addComponent, recalculate } from "./starship-designer.mjs";
 
 const MODULE_ID = "fvtt-neon-odyssey";
 const HUD_PANEL_NAME = "hud-sheet-panel";   // Drawing text on the HUD scene that marks the panel
@@ -91,10 +91,16 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     // Speed: every non-zero movement type (view); every visible type (edit)
     const mv = sys.attributes.movement ?? {};
     const moveTypes = Object.entries(cfg.movementTypes).filter(([, t]) => !t.hidden);
-    const speed = moveTypes
+    let speed = moveTypes
       .filter(([k]) => Number(mv[k]) > 0)
       .map(([k, t]) => `${L(t.label)} ${mv[k]}`)
       .join(", ");
+    // Designed ships: show the signed speed; negative N = one move every |N| turns.
+    if ( isDesigned(actor) && Number.isFinite(flags.speed) ) {
+      const label = L(cfg.movementTypes[flags.movementKey ?? "fly"]?.label ?? "DND5E.MOVEMENT.Type.Fly");
+      const n = flags.speed;
+      speed = n < 0 ? `${label} ${n} (1 move every ${-n} turns)` : n === 0 ? `${label} 0 (no movement)` : `${label} ${n}`;
+    }
     const movement = moveTypes.map(([k, t]) => ({ key: k, label: L(t.label), value: src.attributes.movement?.[k] ?? null }));
 
     // Abilities: a score of 0 renders blank in view mode
@@ -137,6 +143,9 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
         name: item.name,
         qty: item.system.quantity ?? 1,
         crew: iflags.crew ?? null,
+        power: iflags.component?.power ?? null,
+        powerTotal: iflags.component?.power != null ? iflags.component.power * (item.system.quantity ?? 1) : null,
+        multi: (item.system.quantity ?? 1) > 1,
         rangeBand: iflags.rangeBand ?? "",
         line: parts.join(" · "),
         hasAttack: !!attack
@@ -146,10 +155,14 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     // Designer slots (edit mode)
     const parts = getParts(actor);
     const slots = Object.entries(SLOTS).filter(([k]) => k !== "weapon").map(([key, slot]) => {
-      const installed = parts.filter(p => p.c.category === key).map(p => ({ id: p.item.id, name: p.item.name, qty: p.qty }));
-      return { key, label: slot.label, stack: slot.stack, installed, open: slot.max - installed.length > 0 && !(slot.max === 1 && installed.length) };
+      const installed = parts.filter(p => slotOf(p.c) === key).map(p => ({ id: p.item.id, name: p.item.name, qty: p.qty }));
+      return { key, label: slot.label, hint: slot.hint ?? "", stack: slot.stack, installed, open: slot.max - installed.length > 0 && !(slot.max === 1 && installed.length) };
     });
     const design = flags.design ?? {};
+    const missingDims = !(Number(src.traits.keel?.value) > 0 && Number(src.traits.beam?.value) > 0 && Number(flags.draft) > 0);
+    const missingBuilder = !String(design.builtBy ?? "").trim();
+    const tonsLabel = w.value != null ? dnd5e.utils.formatWeight(w.value, w.units ?? "tn", { unitDisplay: "long" }) : "";
+    const sizeName = flags.sizeName ?? "";
     const powerSurplus = flags.powerSurplus ?? null;
 
     // Choice lists for edit mode
@@ -158,7 +171,7 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     return Object.assign(context, {
       actor, flags, src,
       editing: this.isEditing,
-      designed, slots, design, powerSurplus, powerNegative: (powerSurplus ?? 0) < 0,
+      designed, slots, design, powerSurplus, missingDims, missingBuilder, tonsLabel, sizeName, powerNegative: (powerSurplus ?? 0) < 0,
       isGM: game.user.isGM, owner: actor.isOwner,
       name: actor.name, priceLabel, line1, line2,
       crewLabel: `${crew}/${crew + pax}`,

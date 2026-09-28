@@ -1,7 +1,7 @@
-2026/09/27-14:17:30.055 4538 Recovering log #173
-2026/09/27-14:17:30.147 4538 Delete type=3 #171
-2026/09/27-14:17:30.150 4538 Delete type=0 #173
-2026/09/27-14:32:08.200 76f4 Level-0 table #178: started
-2026/09/27-14:32:08.201 76f4 Level-0 table #178: 0 bytes OK
-2026/09/27-14:32:08.217 76f4 Delete type=0 #176
-2026/09/27-14:32:08.218 76f4 Manual compaction at level-0 from '!folders!068ad6acf07e9ad4' @ 72057594037927935 : 1 .. '!items!ff839977eb2c7b24' @ 0 : 0; will stop at (end)
+2026/09/27-18:32:36.756 7ecc Recovering log #209
+2026/09/27-18:32:36.846 7ecc Delete type=3 #207
+2026/09/27-18:32:36.847 7ecc Delete type=0 #209
+2026/09/27-19:07:44.646 5328 Level-0 table #214: started
+2026/09/27-19:07:44.646 5328 Level-0 table #214: 0 bytes OK
+2026/09/27-19:07:44.663 5328 Delete type=0 #212
+2026/09/27-19:07:44.723 5328 Manual compaction at level-0 from '!folders!068ad6acf07e9ad4' @ 72057594037927935 : 1 .. '!items!phbbgSoldier0000' @ 0 : 0; will stop at (end)

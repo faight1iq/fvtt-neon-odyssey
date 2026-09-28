@@ -12,10 +12,21 @@ export const SLOTS = {
   material:   { label: "Material",     max: 1, stack: false },
   propulsion: { label: "Propulsion",   max: 1, stack: true },
   power:      { label: "Power Source", max: 1, stack: true },
-  defense:    { label: "Defense",      max: 1, stack: false },
+  armor:      { label: "Armor",        max: 1, stack: false, hint: "Cladding" },
+  shield:     { label: "Shield",       max: 1, stack: false, hint: "Arcane or Projector" },
   special:    { label: "Special",      max: 3, stack: false },
   weapon:     { label: "Weapons",      max: 11, stack: true }
 };
+
+/**
+ * Which slot a component fills. The spreadsheet's Defense table holds both armor and shields:
+ * IDs below 20 (Cladding) are armor; 20 and up (Arcane, Projector) are shields.
+ */
+export function slotOf(c) {
+  if ( c.category !== "defense" ) return c.category;
+  if ( c.slot ) return c.slot;
+  return parseInt(c.key, 10) < 20 ? "armor" : "shield";
+}
 
 /** dnd5e sizes for the nine Paradox sizes (dnd5e has six). */
 const DND_SIZE = {
@@ -42,7 +53,8 @@ export function computeShip({ keel, beam, draft, builtBy = "", cargo = 0, parts 
   const by = cat => parts.filter(p => p.c.category === cat);
   const one = cat => by(cat)[0] ?? null;
   const shipType = one("shipType"), material = one("material"), prop = one("propulsion");
-  const power = one("power"), defense = one("defense");
+  const power = one("power");
+  const defenses = ["armor", "shield"].map(k => parts.find(p => slotOf(p.c) === k)).filter(Boolean);
   const specials = by("special").slice(0, 3), weapons = by("weapon").slice(0, 11);
 
   // Dimensions -> tonnage (C7); the sheet falls back to 5x5x10 when dimensions are missing.
@@ -60,7 +72,7 @@ export function computeShip({ keel, beam, draft, builtBy = "", cargo = 0, parts 
   const col = { D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0 };
   const addRow = r => { for ( const k in r ) col[k] += Number(r[k]) || 0; };
 
-  addRow({ D: tons > 0 ? -round(Math.log(tons) / Math.log(1.3)) : 0 });             // row 7
+  addRow({ D: tons >= 1 ? -round(Math.log2(tons)) : 0 });                          // row 7: -ROUND(LOG(tons, 2)); 0 under 1 ton
   addRow({ D: size.speed, G: size.dt + ratio, I: -size.power });                      // row 8
   if ( material ) addRow({ D: material.c.speed, E: material.c.ac, G: material.c.dt, K: ratio * material.c.cost });
   if ( prop ) {
@@ -71,7 +83,7 @@ export function computeShip({ keel, beam, draft, builtBy = "", cargo = 0, parts 
     const q = power.qty;
     addRow({ H: power.c.mishap, I: power.c.power * q, J: power.c.crew * q, K: power.c.cost * q });
   }
-  if ( defense ) addRow({ D: defense.c.speed, E: defense.c.ac, H: defense.c.mishap, I: -defense.c.power, K: defense.c.cost * ratio });
+  for ( const d of defenses ) addRow({ D: d.c.speed, E: d.c.ac, H: d.c.mishap, I: -d.c.power, K: d.c.cost * ratio });
   for ( const s of specials ) addRow({ D: s.c.speed, E: s.c.ac, F: s.c.hp, G: s.c.dt, H: s.c.mishap, I: s.c.power });
   for ( const w of weapons ) addRow({ H: w.c.mishap, I: -w.c.power * w.qty, J: w.c.crew * w.qty, K: w.c.cost });
 
@@ -91,7 +103,7 @@ export function computeShip({ keel, beam, draft, builtBy = "", cargo = 0, parts 
     cost: mround(col.K, 5000),
     crew: col.J,
     hp: round(ratio * size.hp + col.F * ratio),
-    speed: round(col.D),
+    speed: Math.max(1, round(col.D)),                                              // B46: MAX(1, ROUND(SUM(D)))
     ac: col.E,
     dt: round(dt),
     mt: round(dt * 1.5) + col.H,
@@ -134,7 +146,9 @@ export async function recalculate(actor) {
   const hp = actor.system.attributes.hp;
   const wasFull = hp.value == null || hp.value >= (hp.max ?? 0);
   const movement = { walk: 0, burrow: 0, climb: 0, fly: 0, swim: 0 };
-  movement[s.movementKey] = s.speed;
+  // dnd5e movement can't be negative; the signed value lives in flags.speed.
+  // Negative speed N means the ship gets one move every |N| turns.
+  movement[s.movementKey] = Math.max(0, s.speed);
 
   const update = {
     "system.traits.size": s.dndSize,
@@ -163,7 +177,9 @@ export async function recalculate(actor) {
     [`flags.${MODULE_ID}.sizeName`]: s.size,
     [`flags.${MODULE_ID}.description`]: s.description,
     [`flags.${MODULE_ID}.mishapNames`]: s.mishapNames,
-    [`flags.${MODULE_ID}.powerSurplus`]: s.powerSurplus
+    [`flags.${MODULE_ID}.powerSurplus`]: s.powerSurplus,
+    [`flags.${MODULE_ID}.speed`]: s.speed,
+    [`flags.${MODULE_ID}.movementKey`]: s.movementKey
   };
   for ( const [k, v] of Object.entries(movement) ) update[`system.attributes.movement.${k}`] = v;
 
@@ -186,8 +202,9 @@ export async function recalculate(actor) {
 export async function addComponent(actor, source) {
   const c = source.flags?.[MODULE_ID]?.component;
   if ( !c ) return false;
-  const slot = SLOTS[c.category];
-  const parts = getParts(actor).filter(p => p.c.category === c.category);
+  const slotKey = slotOf(c);
+  const slot = SLOTS[slotKey];
+  const parts = getParts(actor).filter(p => slotOf(p.c) === slotKey);
   const same = parts.find(p => p.c.key === c.key);
 
   if ( slot.stack && same ) {
@@ -227,7 +244,8 @@ function onItemChange(item, options, userId) {
   recalculate(actor);
 }
 Hooks.on("createItem", onItemChange);
-Hooks.on("updateItem", onItemChange);
+// updateItem passes (item, changes, options, userId); create/delete pass (item, options, userId).
+Hooks.on("updateItem", (item, changes, options, userId) => onItemChange(item, options, userId));
 Hooks.on("deleteItem", (item, options, userId) => {
   if ( options?.[`${MODULE_ID}.recalc`] ) return;   // slot replacement; the new component triggers the recalc
   onItemChange(item, options, userId);

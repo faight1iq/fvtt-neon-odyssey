@@ -1,8 +1,8 @@
-2026/09/27-14:17:30.265 75c8 Recovering log #177
-2026/09/27-14:17:30.351 75c8 Delete type=3 #175
-2026/09/27-14:17:30.352 75c8 Delete type=0 #177
-2026/09/27-14:32:08.236 76f4 Level-0 table #182: started
-2026/09/27-14:32:08.251 76f4 Level-0 table #182: 0 bytes OK
-2026/09/27-14:32:08.301 76f4 Delete type=0 #180
-2026/09/27-14:32:08.355 76f4 Manual compaction at level-0 from '!folders!NOspCantrips0000' @ 72057594037927935 : 1 .. '!items!WitheringLightni' @ 0 : 0; will stop at (end)
-2026/09/27-14:32:08.355 76f4 Manual compaction at level-1 from '!folders!NOspCantrips0000' @ 72057594037927935 : 1 .. '!items!WitheringLightni' @ 0 : 0; will stop at (end)
+2026/09/27-18:32:36.951 3098 Recovering log #214
+2026/09/27-18:32:37.043 3098 Delete type=3 #212
+2026/09/27-18:32:37.045 3098 Delete type=0 #214
+2026/09/27-19:07:44.863 5328 Level-0 table #219: started
+2026/09/27-19:07:44.863 5328 Level-0 table #219: 0 bytes OK
+2026/09/27-19:07:44.880 5328 Delete type=0 #217
+2026/09/27-19:07:44.897 5328 Manual compaction at level-0 from '!folders!7mKXtOuVmi3ibrqo' @ 72057594037927935 : 1 .. '!items!phbswdMordenkain' @ 0 : 0; will stop at (end)
+2026/09/27-19:07:44.899 5328 Manual compaction at level-1 from '!folders!7mKXtOuVmi3ibrqo' @ 72057594037927935 : 1 .. '!items!phbswdMordenkain' @ 0 : 0; will stop at (end)
