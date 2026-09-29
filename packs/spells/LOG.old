@@ -1,8 +1,8 @@
-2026/09/27-18:32:36.951 3098 Recovering log #214
-2026/09/27-18:32:37.043 3098 Delete type=3 #212
-2026/09/27-18:32:37.045 3098 Delete type=0 #214
-2026/09/27-19:07:44.863 5328 Level-0 table #219: started
-2026/09/27-19:07:44.863 5328 Level-0 table #219: 0 bytes OK
-2026/09/27-19:07:44.880 5328 Delete type=0 #217
-2026/09/27-19:07:44.897 5328 Manual compaction at level-0 from '!folders!7mKXtOuVmi3ibrqo' @ 72057594037927935 : 1 .. '!items!phbswdMordenkain' @ 0 : 0; will stop at (end)
-2026/09/27-19:07:44.899 5328 Manual compaction at level-1 from '!folders!7mKXtOuVmi3ibrqo' @ 72057594037927935 : 1 .. '!items!phbswdMordenkain' @ 0 : 0; will stop at (end)
+2026/09/28-22:37:32.701 39cc Recovering log #232
+2026/09/28-22:37:32.788 39cc Delete type=3 #230
+2026/09/28-22:37:32.790 39cc Delete type=0 #232
+2026/09/28-22:37:40.202 6b08 Level-0 table #237: started
+2026/09/28-22:37:40.202 6b08 Level-0 table #237: 0 bytes OK
+2026/09/28-22:37:40.217 6b08 Delete type=0 #235
+2026/09/28-22:37:40.219 6b08 Manual compaction at level-0 from '!folders!7mKXtOuVmi3ibrqo' @ 72057594037927935 : 1 .. '!items!phbswdMordenkain' @ 0 : 0; will stop at (end)
+2026/09/28-22:37:40.219 6b08 Manual compaction at level-1 from '!folders!7mKXtOuVmi3ibrqo' @ 72057594037927935 : 1 .. '!items!phbswdMordenkain' @ 0 : 0; will stop at (end)

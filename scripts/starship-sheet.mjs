@@ -7,6 +7,7 @@
 // Weapon flags: crew (number), rangeBand (string: Point Blank | Short | Medium | Long | Extreme)
 
 import { SLOTS, slotOf, isDesigned, getParts, addComponent, recalculate } from "./starship-designer.mjs";
+import { MISHAP_TIERS, possibleMishaps, shipStrain, shipPasses, tierForPasses } from "./mishap-links.mjs";
 
 const MODULE_ID = "fvtt-neon-odyssey";
 const HUD_PANEL_NAME = "hud-sheet-panel";   // Drawing text on the HUD scene that marks the panel
@@ -35,7 +36,8 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       deleteItem: StarshipSheet.#onDeleteItem,
       openMishap: StarshipSheet.#onOpenMishap,
       removeMishap: StarshipSheet.#onRemoveMishap,
-      recalculate: StarshipSheet.#onRecalculate
+      recalculate: StarshipSheet.#onRecalculate,
+      editShipImage: StarshipSheet.#onEditShipImage
     }
   };
 
@@ -117,16 +119,13 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     });
 
     // Possible Mishaps
-    const manual = (flags.mishaps ?? []).map(uuid => {
-      const doc = fromUuidSync(uuid);
-      return { uuid, name: doc?.name ?? "(missing)", missing: !doc, manual: true };
-    });
-    const computed = designed ? (flags.mishapNames ?? []).map(name => {
-      const doc = game.actors.getName(name);
-      return { uuid: doc?.uuid ?? "", name, missing: false, manual: false };
-    }) : [];
-    const seen = new Set(computed.map(m => m.name));
-    const mishaps = [...computed, ...manual.filter(m => !seen.has(m.name))];
+    // Component keys resolve to the Actors compendium at the tier Strain has reached
+    // (see mishap-links.mjs); mishaps dropped on the sheet by hand stay as dropped.
+    const strain = shipStrain(actor);
+    const passes = shipPasses(actor, strain);
+    const tier = tierForPasses(passes);
+    const mishaps = (await possibleMishaps(actor, tier)).filter(m => designed || m.manual);
+    const mishapTier = strain === null ? "" : `${MISHAP_TIERS[tier]} at Strain ${strain}`;
 
     // Weapon Stations
     const weapons = actor.items.filter(i => i.type === "weapon").map(item => {
@@ -169,6 +168,9 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     const toChoices = (obj, key) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, L(v[key] ?? v)]));
 
     return Object.assign(context, {
+      // Actors made from the dnd5e default still carry its placeholder icon; show the token art instead.
+      shipImg: (!actor.img || actor.img.startsWith("systems/dnd5e/icons/") || actor.img.startsWith("icons/svg/"))
+        ? (actor.prototypeToken?.texture?.src || actor.img) : actor.img,
       actor, flags, src,
       editing: this.isEditing,
       designed, slots, design, powerSurplus, missingDims, missingBuilder, tonsLabel, sizeName, powerNegative: (powerSurplus ?? 0) < 0,
@@ -179,7 +181,7 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       ac: sys.attributes.ac?.value ?? sys.attributes.ac?.flat ?? "",
       hp: sys.attributes.hp,
       mt: sys.attributes.hp?.mt ?? "",
-      speed, movement, abilities, mishaps, weapons,
+      speed, movement, abilities, mishaps, mishapTier, weapons,
       rangeBands: RANGE_BANDS,
       sizeChoices: toChoices(cfg.actorSizes, "label"),
       weightChoices: toChoices(cfg.weightUnits, "abbreviation"),
@@ -353,6 +355,38 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     const uuid = target.closest("[data-uuid]")?.dataset.uuid;
     const list = (this.actor.getFlag(MODULE_ID, "mishaps") ?? []).filter(u => u !== uuid);
     await this.actor.setFlag(MODULE_ID, "mishaps", list);
+  }
+
+  /**
+   * Pick a new ship image. It becomes the actor portrait, the prototype token image, and the
+   * image of every token of this ship already placed on a scene (linked tokens, or this
+   * token itself when the sheet belongs to an unlinked token).
+   */
+  static async #onEditShipImage(event, target) {
+    const actor = this.actor;
+    const FilePicker = foundry.applications.apps.FilePicker.implementation;
+    const picker = new FilePicker({
+      type: "image",
+      current: actor.img,
+      callback: async path => {
+        if ( !path || (path === actor.img) ) return;
+        if ( actor.isToken ) {
+          await actor.update({ img: path });
+          await actor.token.update({ "texture.src": path });
+          return;
+        }
+        await actor.update({ img: path, "prototypeToken.texture.src": path });
+        for ( const scene of game.scenes ) {
+          const updates = scene.tokens
+            .filter(t => t.actorLink && (t.actorId === actor.id))
+            .map(t => ({ _id: t.id, "texture.src": path }));
+          if ( !updates.length ) continue;
+          try { await scene.updateEmbeddedDocuments("Token", updates); }
+          catch(err) { console.warn(`${MODULE_ID} | could not update tokens on ${scene.name}`, err); }
+        }
+      }
+    });
+    return picker.browse();
   }
 
   static async #onRecalculate() {

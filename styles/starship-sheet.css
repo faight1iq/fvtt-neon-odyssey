@@ -98,6 +98,11 @@
 }
 .no-ss input:focus, .no-ss select:focus { border-color: var(--ss-accent); box-shadow: none; outline: none; }
 .no-ss input.n { width: 52px; text-align: center; flex: 0 0 auto; }
+.no-ss .no-ss-hdr .e-img {
+  flex: 0 0 auto; width: 44px; height: 44px; object-fit: contain; align-self: center;
+  border: 1px solid var(--ss-line); border-radius: 3px; background: rgba(0, 0, 0, .35); cursor: pointer;
+}
+.no-ss .no-ss-hdr .e-img:hover { border-color: var(--ss-accent); box-shadow: 0 0 6px rgba(255, 154, 60, .55); }
 .no-ss .e-name { flex: 1; height: 26px; font-size: 18px; font-variant: small-caps; color: var(--ss-accent); }
 .no-ss .e-price { display: flex; gap: 4px; }
 .no-ss .e-price input { width: 90px; }
@@ -136,3 +141,12 @@
 .no-ss .e-row.dims { margin: 0 0 5px; }
 .no-ss-weap .pwr { font-weight: normal; color: #ffd166; font-size: 10.5px; margin-left: 6px; }
 .no-ss-design .drop { border: 1px dashed var(--ss-chip-line); border-radius: 3px; padding: 0 6px; font-size: 10px; color: var(--ss-muted); font-style: italic; }
+
+/* ---------- Crew Station chat cards (Tempo / Strain results, Mishap alerts) ---------- */
+.chat-message .no-crew-card { font-size: var(--font-size-12, 12px); line-height: 1.35; }
+.chat-message .no-crew-card h3 {
+  font-size: var(--font-size-13, 13px); font-weight: bold; margin: 0 0 2px; padding: 0;
+  border: none; line-height: 1.3;
+}
+.chat-message .no-crew-card p { margin: 0 0 2px; font-size: inherit; }
+.chat-message .no-crew-card .no-crew-alert { color: #c0392b; }

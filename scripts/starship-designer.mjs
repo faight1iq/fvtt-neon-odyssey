@@ -3,6 +3,7 @@
 // carrying flags["fvtt-neon-odyssey"].component; this file turns them into ship stats.
 
 import { SIZES } from "./starship-data.mjs";
+import "./crew-stations.mjs";
 
 export const MODULE_ID = "fvtt-neon-odyssey";
 
@@ -299,4 +300,19 @@ Hooks.on("dnd5e.preRollAttackV2", (config, dialog, message) => {
     return;
   }
   if ( message?.data ) message.data.flavor = `${message.data.flavor ?? activity.item.name} (Gunner: ${gunner.name})`;
+});
+
+/* -------------------------------------------- */
+/*  No token ring on starships                  */
+/* -------------------------------------------- */
+
+// Ship tokens use their own art (read on the radar), so the dynamic token ring is always off
+// for vehicles: on new vehicle actors' prototype tokens and on every vehicle token placed.
+Hooks.on("preCreateActor", (actor, data) => {
+  if ( actor.type !== "vehicle" ) return;
+  actor.updateSource({ "prototypeToken.ring.enabled": false });
+});
+Hooks.on("preCreateToken", (token, data) => {
+  if ( token.actor?.type !== "vehicle" ) return;
+  token.updateSource({ "ring.enabled": false });
 });

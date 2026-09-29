@@ -2,7 +2,7 @@
   "id": "fvtt-neon-odyssey",
   "title": "Foundry VTT Neon Odyssey -by Faight",
   "description": "A custom Foundry VTT Port for Neon Odyssey",
-  "version": "260927.18.43",
+  "version": "260928.13.25",
   "compatibility": {
     "minimum": "1",
     "verified": "13.351",
@@ -202,7 +202,8 @@
     "scripts/register-weapons.mjs",
     "scripts/register-tools.mjs",
     "scripts/starship-designer.mjs",
-    "scripts/starship-sheet.mjs"
+    "scripts/starship-sheet.mjs",
+    "scripts/crew-stations.mjs"
   ],
   "styles": [
     "styles/starship-sheet.css"

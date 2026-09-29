@@ -2,6 +2,8 @@
 {{#if editing}}
   {{!-- ============================== EDIT MODE ============================== --}}
   <header class="no-ss-hdr">
+    <img class="e-img" src="{{shipImg}}" alt="" data-action="editShipImage"
+      data-tooltip="Change ship image (sheet portrait and every linked token)">
     <input class="e-name" type="text" name="name" value="{{name}}" placeholder="Name">
     <span class="e-price">
       <input type="number" name="system.attributes.price.value" value="{{src.attributes.price.value}}" placeholder="Price">
@@ -139,7 +141,7 @@
   {{!-- ============================== BOTH MODES ============================== --}}
   <div class="no-ss-rule"></div>
   <section class="mishap-zone">
-    <div class="no-ss-sec">Possible Mishaps ({{mishaps.length}})
+    <div class="no-ss-sec">Possible Mishaps ({{mishaps.length}}){{#if mishapTier}} <span class="sub">· {{mishapTier}}</span>{{/if}}
       {{#if editing}}<span class="hint">Drop Mishap actors here to add</span>
       {{else if isGM}}<span class="hint">Drag onto a ship system</span>{{/if}}
     </div>
