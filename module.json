@@ -2,7 +2,7 @@
   "id": "fvtt-neon-odyssey",
   "title": "Foundry VTT Neon Odyssey -by Faight",
   "description": "A custom Foundry VTT Port for Neon Odyssey",
-  "version": "260928.13.25",
+  "version": "260929.00.16",
   "compatibility": {
     "minimum": "1",
     "verified": "13.351",
@@ -20,6 +20,53 @@
         "id": "dnd5e",
         "type": "system",
         "compatibility": {}
+      }
+    ],
+    "requires": [
+      {
+        "id": "tagger",
+        "type": "module",
+        "manifest": "https://github.com/fantasycalendar/FoundryVTT-Tagger/releases/latest/download/module.json",
+        "compatibility": {
+          "minimum": "1.6.0"
+        },
+        "reason": "Finds the Tempo and Strain numbers and the gauge and button tiles on bridge scenes by their tags."
+      },
+      {
+        "id": "monks-active-tiles",
+        "type": "module",
+        "manifest": "https://github.com/ironmonk108/monks-active-tiles/releases/download/13.06/module.json",
+        "compatibility": {
+          "minimum": "13.06"
+        },
+        "reason": "Runs the Tempo and Strain up/down buttons on bridge scenes."
+      },
+      {
+        "id": "tokenmagic",
+        "type": "module",
+        "manifest": "https://github.com/Feu-Secret/Tokenmagic/releases/download/0.7.6.3/module.json",
+        "compatibility": {
+          "minimum": "0.7.6.3"
+        },
+        "reason": "Glows ships on the bridge radar by disposition, and the radar tile's effect."
+      },
+      {
+        "id": "tile-scroll",
+        "type": "module",
+        "manifest": "https://github.com/theripper93/tile-scroll/releases/download/4.0.0/module.json",
+        "compatibility": {
+          "minimum": "4.0.0"
+        },
+        "reason": "Rotates the radar sweep tile on bridge scenes."
+      },
+      {
+        "id": "foundryvtt-dnd-charecter-creator",
+        "type": "module",
+        "manifest": "https://github.com/plaksiy/foundry-charecter-creator/releases/latest/download/module.json",
+        "compatibility": {
+          "minimum": "1.0.7"
+        },
+        "reason": "Guided character creation for Neon Odyssey characters."
       }
     ]
   },
