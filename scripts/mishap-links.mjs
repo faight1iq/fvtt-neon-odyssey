@@ -9,7 +9,7 @@
 // Strain is the bridge's "Strain" drawing when the ship is on the current scene's viewscreen,
 // otherwise the ship's lost hit points (max HP minus current HP).
 
-import { readStat, shipActor } from "./crew-stations.mjs";
+import { readStat, shipActor, tagsOf } from "./crew-stations.mjs";
 
 const MODULE_ID = "fvtt-neon-odyssey";
 const PACK_ID = `${MODULE_ID}.actors`;
@@ -123,7 +123,7 @@ for ( const h of ["createActor", "updateActor", "deleteActor"] ) {
 }
 Hooks.on("updateDrawing", (drawing, changes) => {
   if ( !("text" in changes) ) return;
-  if ( !(drawing.flags?.tagger?.tags ?? []).some(t => String(t).toLowerCase() === "strain") ) return;
+  if ( !tagsOf(drawing).includes("strain") ) return;
   const ship = shipActor(drawing.parent);
   if ( ship?.sheet?.rendered ) ship.sheet.render();
 });

@@ -30,6 +30,20 @@ export const ROLE_ITEMS = {
   engineer:  "NOcrewRoleEng000"
 };
 
+/**
+ * Combined stations (John, 2026-10-11): one station that carries two roles. The crew member
+ * standing there gets both roles' Crew Role features (plus Any Station).
+ *   Pilot   = Helmsman + Gunner
+ *   Copilot = Helmsman + Navigator
+ */
+export const COMBINED_STATIONS = {
+  pilot:   ["helmsman", "gunner"],
+  copilot: ["helmsman", "navigator"]
+};
+
+/** Role keys a station flag grants: itself, or the roles of a combined station. */
+const rolesForStation = key => COMBINED_STATIONS[key] ?? (ROLE_ITEMS[key] ? [key] : []);
+
 const isActiveGM = () => game.users.activeGM?.isSelf ?? false;
 
 /* -------------------------------------------- */
@@ -38,17 +52,28 @@ const isActiveGM = () => game.users.activeGM?.isSelf ?? false;
 
 Hooks.once("init", () => {
   CONFIG.DND5E.featureTypes[FEATURE_TYPE] = { label: "Crew Role" };
-  game.modules.get(MODULE_ID).crew = { reconcileScene, reconcileActor, readStat, applyCost, adjustStat, ROLE_ITEMS };
+  game.modules.get(MODULE_ID).crew = { reconcileScene, reconcileActor, readStat, applyCost, adjustStat, resetStats, crewOnStations, syncSpeed, radarCenterShip, shipSpeed, adjustSpeed, steerForward, steerTurn, ROLE_ITEMS, COMBINED_STATIONS };
 });
 
 /* -------------------------------------------- */
 /*  Scene helpers                               */
 /* -------------------------------------------- */
 
+/**
+ * A document's Tagger tags, lower-cased. Tagger stores a list, but documents whose tag box was
+ * cleared can hold an empty or comma-separated string instead.
+ */
+export function tagsOf(doc) {
+  const t = doc?.flags?.tagger?.tags;
+  if ( Array.isArray(t) ) return t.map(x => String(x).trim().toLowerCase());
+  if ( typeof t === "string" ) return t.split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
+  return [];
+}
+
 /** The drawing on a scene tagged with the given Tagger tag (case-insensitive). */
 function statDrawing(scene, tag) {
   tag = tag.toLowerCase();
-  return scene?.drawings.find(d => (d.flags?.tagger?.tags ?? []).some(t => String(t).toLowerCase() === tag));
+  return scene?.drawings.find(d => tagsOf(d).includes(tag));
 }
 
 /** Current numeric value of the "Tempo" or "Strain" drawing, or null if there isn't one. */
@@ -74,7 +99,19 @@ export function shipActor(scene) {
   return token?.actor ?? null;
 }
 
-/** Station keys of every station region that contains this token's center. */
+/** Whether a point lies inside a tile's (possibly rotated) rectangle. */
+function pointInTile(tile, { x, y }) {
+  const w = Math.abs(tile.width), h = Math.abs(tile.height);
+  const cx = tile.x + w / 2, cy = tile.y + h / 2;
+  const a = -Math.toRadians(tile.rotation ?? 0);
+  const dx = x - cx, dy = y - cy;
+  const rx = dx * Math.cos(a) - dy * Math.sin(a);
+  const ry = dx * Math.sin(a) + dy * Math.cos(a);
+  return (Math.abs(rx) <= w / 2) && (Math.abs(ry) <= h / 2);
+}
+
+/** Role keys granted by every station (region or tile) that contains this token's center.
+ *  A combined station (Pilot, Copilot) contributes both of its roles. */
 function stationsForToken(tokenDoc, pos = {}) {
   const scene = tokenDoc.parent;
   const out = new Set();
@@ -82,20 +119,30 @@ function stationsForToken(tokenDoc, pos = {}) {
   const size = scene.grid.size;
   // During updateToken in v13 the document can still report its pre-move position,
   // so callers pass the new coordinates from the change data.
-  const x = pos.x ?? tokenDoc.x;
-  const y = pos.y ?? tokenDoc.y;
+  // Stored values, not the getters: while a token animates (or forever, in a hidden browser tab,
+  // where animation is paused) the getters report the in-between position and size.
+  const src = tokenDoc._source;
+  const x = pos.x ?? src.x;
+  const y = pos.y ?? src.y;
   const point = {
-    x: x + (tokenDoc.width * size) / 2,
-    y: y + (tokenDoc.height * size) / 2,
-    elevation: pos.elevation ?? tokenDoc.elevation ?? 0
+    x: x + (src.width * size) / 2,
+    y: y + (src.height * size) / 2,
+    elevation: pos.elevation ?? src.elevation ?? 0
   };
   for ( const region of scene.regions ) {
-    const key = region.getFlag(MODULE_ID, "station");
-    if ( !key || !ROLE_ITEMS[key] ) continue;
+    const roles = rolesForStation(region.getFlag(MODULE_ID, "station"));
+    if ( !roles.length ) continue;
     let inside = false;
     try { inside = region.testPoint(point); }
     catch(err) { inside = region.testPoint({ x: point.x, y: point.y }, point.elevation); }
-    if ( inside ) out.add(key);
+    if ( inside ) for ( const r of roles ) out.add(r);
+  }
+  // Tiles flagged as stations count the same as regions (Token Attacher can carry tiles, not
+  // regions). The tile's rectangle, rotated with the tile, is the station area.
+  for ( const tile of scene.tiles ) {
+    const roles = rolesForStation(tile.getFlag(MODULE_ID, "station"));
+    if ( !roles.length ) continue;
+    if ( pointInTile(tile, point) ) for ( const r of roles ) out.add(r);
   }
   return out;
 }
@@ -118,7 +165,14 @@ async function waitForMovement(tokenDoc) {
     if ( !state || (state === "completed") || (state === "stopped") ) break;
     await new Promise(r => setTimeout(r, 100));
   }
-  try { await tokenDoc.object?.movementAnimationPromise; } catch(err) { /* animation was cancelled */ }
+  // The on-screen animation never finishes while this browser tab is hidden (the browser pauses
+  // animation), so don't wait for it then, and never wait more than 2 seconds for it.
+  if ( document.visibilityState === "hidden" ) return;
+  const animation = tokenDoc.object?.movementAnimationPromise;
+  if ( !animation ) return;
+  try {
+    await Promise.race([animation, new Promise(r => setTimeout(r, 2000))]);
+  } catch(err) { /* animation was cancelled */ }
 }
 
 /**
@@ -133,7 +187,7 @@ async function syncTokenSize(tokenDoc, onStation) {
   if ( onStation && !saved ) {
     await tokenDoc.update({
       width: STATION_SIZE, height: STATION_SIZE,
-      [`flags.${MODULE_ID}.stationSize`]: { width: tokenDoc.width, height: tokenDoc.height }
+      [`flags.${MODULE_ID}.stationSize`]: { width: tokenDoc._source.width, height: tokenDoc._source.height }
     });
   } else if ( !onStation && saved ) {
     await tokenDoc.update({
@@ -187,9 +241,12 @@ export async function reconcileScene(scene = canvas.scene) {
   }
 }
 
-const sceneHasStations = scene => scene?.regions.some(r => r.getFlag(MODULE_ID, "station"));
-const sceneHasRadar = scene => scene?.regions.some(r => r.getFlag(MODULE_ID, "radar"));
-const sceneHasViewscreen = scene => scene?.regions.some(r => r.getFlag(MODULE_ID, "viewscreen"));
+const sceneHasStations = scene => !!scene && (scene.regions.some(r => r.getFlag(MODULE_ID, "station"))
+  || scene.tiles.some(t => t.getFlag(MODULE_ID, "station")));
+const sceneHasFlag = (scene, flag) => !!scene && (scene.regions.some(r => r.getFlag(MODULE_ID, flag))
+  || scene.tiles.some(t => t.getFlag(MODULE_ID, flag)));
+const sceneHasRadar = scene => sceneHasFlag(scene, "radar");
+const sceneHasViewscreen = scene => sceneHasFlag(scene, "viewscreen");
 
 /* -------------------------------------------- */
 /*  Radar                                       */
@@ -240,15 +297,36 @@ function inFlaggedRegion(tokenDoc, flag) {
     y: src.y + (src.height * size) / 2,
     elevation: src.elevation ?? 0
   };
-  return scene.regions.some(region => {
+  const inRegion = scene.regions.some(region => {
     if ( !region.getFlag(MODULE_ID, flag) ) return false;
     try { return region.testPoint(point); }
     catch(err) { return region.testPoint({ x: point.x, y: point.y }, point.elevation); }
   });
+  if ( inRegion ) return true;
+  // Tiles carrying the flag (Token Attacher HUD widgets) count too. The radar's area is the circle
+  // (ellipse) inside the tile, scaled by the tile's optional areaScale flag; others are rectangles.
+  return scene.tiles.some(tile => tile.getFlag(MODULE_ID, flag)
+    && ((flag === "radar") ? pointInTileEllipse(tile, point) : pointInTile(tile, point)));
+}
+
+/** Whether a point lies inside the ellipse inscribed in a tile, scaled by flags.areaScale. */
+function pointInTileEllipse(tile, { x, y }) {
+  const scale = Number(tile.getFlag(MODULE_ID, "areaScale")) || 1;
+  const rx = (Math.abs(tile.width) / 2) * scale, ry = (Math.abs(tile.height) / 2) * scale;
+  if ( !rx || !ry ) return false;
+  const cx = tile.x + Math.abs(tile.width) / 2, cy = tile.y + Math.abs(tile.height) / 2;
+  const a = -Math.toRadians(tile.rotation ?? 0);
+  const dx = x - cx, dy = y - cy;
+  const px = dx * Math.cos(a) - dy * Math.sin(a), py = dx * Math.sin(a) + dy * Math.cos(a);
+  return ((px * px) / (rx * rx)) + ((py * py) / (ry * ry)) <= 1;
 }
 
 /** Center of the first region carrying the given module flag (from its first shape). */
 function flaggedRegionCenter(scene, flag) {
+  const tile = scene?.tiles.find(t => t.getFlag(MODULE_ID, flag));
+  if ( tile && !scene.regions.some(r => r.getFlag(MODULE_ID, flag)) ) {
+    return { x: tile.x + Math.abs(tile.width) / 2, y: tile.y + Math.abs(tile.height) / 2 };
+  }
   const region = scene?.regions.find(r => r.getFlag(MODULE_ID, flag));
   const sh = region?.shapes[0];
   if ( !sh ) return null;
@@ -301,8 +379,35 @@ async function enterViewscreen(tokenDoc) {
     y: c.y - (VIEW_SIZE * grid) / 2,
     width: VIEW_SIZE, height: VIEW_SIZE,
     displayName: CONST.TOKEN_DISPLAY_MODES.ALWAYS,
-    [`flags.${MODULE_ID}.viewSize`]: { width: src.width, height: src.height, displayName: src.displayName }
+    [`flags.${MODULE_ID}.viewSize`]: { width: src.width, height: src.height, displayName: src.displayName,
+      ownershipDefault: await shareShip(tokenDoc.actor) }
   }, { animate: false, neonOdysseyResize: true });
+}
+
+/**
+ * The ship on the viewscreen is the crew's to look at: every player gets at least Observer on it,
+ * so they can open its sheet. Returns the previous default ownership (to restore later), or null
+ * if nothing was changed.
+ */
+async function shareShip(actor) {
+  const base = actor?.isToken ? game.actors.get(actor.token?.actorId) : actor;
+  if ( !base ) return null;
+  const OBSERVER = CONST.DOCUMENT_OWNERSHIP_LEVELS.OBSERVER;
+  const before = base.ownership?.default ?? CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE;
+  if ( before >= OBSERVER ) return null;
+  await base.update({ "ownership.default": OBSERVER });
+  return before;
+}
+
+/** Put a ship's default ownership back the way it was before it went on the viewscreen. */
+async function unshareShip(tokenDoc, saved) {
+  if ( !Number.isInteger(saved?.ownershipDefault) ) return;
+  const base = game.actors.get(tokenDoc.actorId);
+  if ( !base ) return;
+  // Another token of the same ship still on a viewscreen keeps it shared.
+  const stillShown = game.scenes.some(sc => sc.tokens.some(t => (t.id !== tokenDoc.id)
+    && (t.actorId === base.id) && t.getFlag(MODULE_ID, "viewSize")));
+  if ( !stillShown ) await base.update({ "ownership.default": saved.ownershipDefault });
 }
 
 async function leaveViewscreen(tokenDoc) {
@@ -318,6 +423,7 @@ async function leaveViewscreen(tokenDoc) {
     displayName: saved.displayName ?? CONST.TOKEN_DISPLAY_MODES.OWNER_HOVER,
     [`flags.${MODULE_ID}.-=viewSize`]: null
   }, { animate: false, neonOdysseyResize: true });
+  await unshareShip(tokenDoc, saved);
 }
 
 /**
@@ -353,6 +459,189 @@ async function syncShipDisplay(tokenDoc) {
   else if ( inRadar && !onRadar ) await enterRadar(tokenDoc);
   // A ship arriving on or leaving the viewscreen changes whose max HP the Strain gauge uses.
   if ( (inView !== onView) ) await syncGauges(scene);
+  // A friendly ship arriving at (or leaving) the radar's center sets the Speed display.
+  await syncSpeed(scene);
+}
+
+/* -------------------------------------------- */
+/*  Speed display (radar)                       */
+/* -------------------------------------------- */
+
+/** A ship counts as "at the center" when its center is within this fraction of the radar radius
+ *  (one range band of five). */
+const RADAR_CENTER_FRACTION = 0.2;
+
+/** Center and radius of the scene's radar (a flagged tile, or a flagged ellipse region). */
+function radarArea(scene) {
+  const tile = scene?.tiles.find(t => t.getFlag(MODULE_ID, "radar"));
+  if ( tile ) {
+    const scale = Number(tile.getFlag(MODULE_ID, "areaScale")) || 1;
+    const w = Math.abs(tile._source.width), h = Math.abs(tile._source.height);
+    return { x: tile._source.x + w / 2, y: tile._source.y + h / 2, r: (Math.min(w, h) / 2) * scale };
+  }
+  const region = scene?.regions.find(r => r.getFlag(MODULE_ID, "radar"));
+  const sh = region?.shapes[0];
+  if ( sh?.type === "ellipse" ) return { x: sh.x, y: sh.y, r: Math.min(sh.radiusX, sh.radiusY) };
+  if ( sh?.type === "circle" ) return { x: sh.x, y: sh.y, r: sh.radius };
+  return null;
+}
+
+/** The friendly ship at the center of the radar: the friendly vehicle token nearest the center,
+ *  within one range band of it. */
+export function radarCenterShip(scene) {
+  const area = radarArea(scene);
+  if ( !area ) return null;
+  const grid = scene.grid.size;
+  let best = null, bestD = area.r * RADAR_CENTER_FRACTION;
+  for ( const t of scene.tokens ) {
+    if ( (t.actor?.type !== "vehicle") || (t.disposition !== CONST.TOKEN_DISPOSITIONS.FRIENDLY) ) continue;
+    const src = t._source;
+    const d = Math.hypot(src.x + (src.width * grid) / 2 - area.x, src.y + (src.height * grid) / 2 - area.y);
+    if ( d <= bestD ) { best = t; bestD = d; }
+  }
+  return best;
+}
+
+/** A ship's Speed per round: its designed Speed (or its movement value), minimum 1. */
+export function shipSpeed(actor) {
+  const f = actor?.flags?.[MODULE_ID] ?? {};
+  const key = f.movementKey ?? "fly";
+  const raw = Number.isFinite(Number(f.speed)) ? Number(f.speed) : Number(actor?.system?.attributes?.movement?.[key]);
+  return Math.max(1, Number.isFinite(raw) ? Math.floor(raw) : 1);
+}
+
+/**
+ * Set the scene's "Speed" drawing to the center ship's Speed. Without `force` it only does so when
+ * the center ship has changed (so Speed already spent this round is kept). With no ship at the
+ * center the display shows a dash.
+ */
+export async function syncSpeed(scene = canvas.scene, { force = false } = {}) {
+  const drawing = statDrawing(scene, "speed");
+  if ( !drawing ) return;
+  const ship = radarCenterShip(scene);
+  const key = ship?.actor?.uuid ?? null;
+  const stored = drawing.getFlag(MODULE_ID, "speedShip") ?? null;
+  if ( !force && (key === stored) ) return;
+  const text = ship ? String(shipSpeed(ship.actor)) : "\u2014";
+  // Setting Speed starts a new pilot turn: the bands moved and facings turned go back to 0.
+  await drawing.update({ text, [`flags.${MODULE_ID}.speedShip`]: key,
+    [`flags.${MODULE_ID}.steerBands`]: 0, [`flags.${MODULE_ID}.steerFacings`]: 0 });
+}
+
+/* -------------------------------------------- */
+/*  Steering (radar)                            */
+/* -------------------------------------------- */
+
+/** Range bands on the radar, from the center to the rim. */
+const RADAR_BANDS = 5;
+/** Degrees in one clock facing. */
+const FACING_DEGREES = 30;
+
+/**
+ * Speed cost of the next step this pilot turn. Range bands double: 1, 2, 4, 8, 16.
+ * Clock facings rise by 1: 1, 2, 3, 4, 5, 6.
+ */
+const nextBandCost = bandsSoFar => 2 ** bandsSoFar;
+const nextFacingCost = facingsSoFar => facingsSoFar + 1;
+
+/** GM check plus the scene's Speed drawing; warns and returns null if either is missing. */
+function steeringDrawing(scene) {
+  if ( !game.user.isGM ) {
+    ui.notifications.warn("Steering runs on a GM client.");
+    return null;
+  }
+  const d = statDrawing(scene, "speed");
+  if ( !d ) ui.notifications.warn(`No drawing tagged "Speed" on ${scene?.name}.`);
+  return d ?? null;
+}
+
+/** Raise or lower the Speed display by hand (the radar's Speed buttons). Never below 0. */
+export async function adjustSpeed(delta, scene = canvas.scene) {
+  const d = steeringDrawing(scene);
+  if ( !d ) return;
+  return enqueue(async () => {
+    const now = readStat(scene, "speed") ?? 0;
+    await d.update({ text: String(Math.max(0, now + delta)) });
+  });
+}
+
+/** Ships shown on the radar, other than the center ship. */
+function radarShips(scene, center) {
+  return scene.tokens.filter(t => (t.actor?.type === "vehicle") && (t.id !== center?.id)
+    && (t.getFlag(MODULE_ID, "radarSize") || inFlaggedRegion(t, "radar")));
+}
+
+/** Move a radar ship so its center lands on (x, y), kept inside the radar rim. */
+function placeOnRadar(tokenDoc, x, y, area, extra = {}) {
+  const grid = tokenDoc.parent.grid.size;
+  const src = tokenDoc._source;
+  const half = (src.width * grid) / 2;
+  // Keep the whole blip inside the rim; ships pushed past it stop at the edge (out of range).
+  const maxR = Math.max(0, area.r - half - 2);
+  const dx = x - area.x, dy = y - area.y, dist = Math.hypot(dx, dy);
+  if ( dist > maxR ) { x = area.x + (dx / dist) * maxR; y = area.y + (dy / dist) * maxR; }
+  return { _id: tokenDoc.id, x: Math.round(x - half), y: Math.round(y - (src.height * grid) / 2), ...extra };
+}
+
+/** Spend Speed for one step, or warn and return false if there isn't enough. */
+async function spendSpeed(d, scene, cost, what) {
+  const speed = readStat(scene, "speed") ?? 0;
+  if ( speed < cost ) {
+    ui.notifications.warn(`${what} costs ${cost} Speed; only ${speed} left.`);
+    return false;
+  }
+  await d.update({ text: String(speed - cost) });
+  return true;
+}
+
+/**
+ * The pilot moves the ship forward one range band. The center ship stays put (it faces the top
+ * of the radar), so every other ship on the radar moves one band toward the bottom.
+ */
+export async function steerForward(scene = canvas.scene) {
+  const d = steeringDrawing(scene);
+  const area = radarArea(scene);
+  if ( !d || !area ) return;
+  return enqueue(async () => {
+    const bands = Number(d.getFlag(MODULE_ID, "steerBands")) || 0;
+    const cost = nextBandCost(bands);
+    if ( !(await spendSpeed(d, scene, cost, `Band ${bands + 1} this turn`)) ) return;
+    await d.setFlag(MODULE_ID, "steerBands", bands + 1);
+    const step = area.r / RADAR_BANDS;
+    const grid = scene.grid.size;
+    const updates = radarShips(scene, radarCenterShip(scene)).map(t => {
+      const src = t._source;
+      return placeOnRadar(t, src.x + (src.width * grid) / 2, src.y + (src.height * grid) / 2 + step, area);
+    });
+    if ( updates.length ) await scene.updateEmbeddedDocuments("Token", updates, { neonOdysseyResize: true });
+  });
+}
+
+/**
+ * The pilot turns the ship one clock facing. "ccw" (counterclockwise) swings every other ship on
+ * the radar 30° clockwise around the center, and turns each of them 30° clockwise too; "cw" is the
+ * mirror image.
+ */
+export async function steerTurn(direction, scene = canvas.scene) {
+  const d = steeringDrawing(scene);
+  const area = radarArea(scene);
+  if ( !d || !area ) return;
+  return enqueue(async () => {
+    const facings = Number(d.getFlag(MODULE_ID, "steerFacings")) || 0;
+    const cost = nextFacingCost(facings);
+    if ( !(await spendSpeed(d, scene, cost, `Facing ${facings + 1} this turn`)) ) return;
+    await d.setFlag(MODULE_ID, "steerFacings", facings + 1);
+    const deg = (direction === "cw") ? -FACING_DEGREES : FACING_DEGREES;
+    const a = Math.toRadians(deg), cos = Math.cos(a), sin = Math.sin(a);
+    const grid = scene.grid.size;
+    const updates = radarShips(scene, radarCenterShip(scene)).map(t => {
+      const src = t._source;
+      const dx = src.x + (src.width * grid) / 2 - area.x, dy = src.y + (src.height * grid) / 2 - area.y;
+      return placeOnRadar(t, area.x + dx * cos - dy * sin, area.y + dx * sin + dy * cos, area,
+        { rotation: (((src.rotation ?? 0) + deg) % 360 + 360) % 360 });
+    });
+    if ( updates.length ) await scene.updateEmbeddedDocuments("Token", updates, { neonOdysseyResize: true });
+  });
 }
 
 /* -------------------------------------------- */
@@ -380,9 +669,19 @@ Hooks.on("updateToken", (tokenDoc, changes, options) => {
     if ( tmfx ) enqueue(() => tmfx.addUpdateFilters(tokenDoc, radarGlow(tokenDoc)));
   }
   if ( ("x" in changes) || ("y" in changes) || ("elevation" in changes) ) onTokenChange(tokenDoc, changes);
+  // A ship at the radar center turning friendly (or not) changes whose Speed is shown.
+  if ( ("disposition" in changes) && isActiveGM() && (tokenDoc.actor?.type === "vehicle") ) {
+    enqueue(() => syncSpeed(tokenDoc.parent));
+  }
 });
 Hooks.on("deleteToken", tokenDoc => {
-  if ( isActiveGM() && (tokenDoc.actor?.type === "vehicle") ) enqueue(() => syncGauges(tokenDoc.parent));
+  if ( isActiveGM() && (tokenDoc.actor?.type === "vehicle") ) {
+    enqueue(() => syncGauges(tokenDoc.parent));
+    enqueue(() => syncSpeed(tokenDoc.parent));
+    // A ship deleted while on the viewscreen gives back the permission the viewscreen lent.
+    const saved = tokenDoc.getFlag(MODULE_ID, "viewSize");
+    if ( saved ) enqueue(() => unshareShip(tokenDoc, saved));
+  }
   if ( !isActiveGM() || !sceneHasStations(tokenDoc.parent) ) return;
   // A deleted unlinked token takes its synthetic actor with it; only linked actors need cleanup.
   const actor = tokenDoc.actorLink ? game.actors.get(tokenDoc.actorId) : null;
@@ -391,6 +690,15 @@ Hooks.on("deleteToken", tokenDoc => {
 Hooks.on("updateRegion", region => {
   if ( isActiveGM() && sceneHasStations(region.parent) ) enqueue(() => reconcileScene(region.parent));
 });
+// Station tiles: moving, resizing, adding or removing one re-checks every crew member on the scene.
+for ( const hook of ["createTile", "updateTile", "deleteTile"] ) {
+  Hooks.on(hook, (tile, changes) => {
+    if ( !isActiveGM() ) return;
+    if ( hook === "updateTile" && !["x", "y", "width", "height", "rotation", "flags"].some(k => k in (changes ?? {})) ) return;
+    const flagged = tile.getFlag(MODULE_ID, "station") || foundry.utils.hasProperty(changes ?? {}, `flags.${MODULE_ID}.station`);
+    if ( flagged ) enqueue(() => reconcileScene(tile.parent));
+  });
+}
 Hooks.on("canvasReady", () => {
   if ( isActiveGM() && sceneHasStations(canvas.scene) ) enqueue(() => reconcileScene(canvas.scene));
 });
@@ -512,6 +820,67 @@ export async function applyCost(scene, cost, { actor, label } = {}) {
 }
 
 /**
+ * Player characters standing on a station on this scene: character actors with a player owner
+ * whose token center is inside a station region or station tile. Each actor counts once.
+ * @returns {Actor[]}
+ */
+export function crewOnStations(scene) {
+  const out = new Map();
+  for ( const t of scene?.tokens ?? [] ) {
+    const actor = t.actor;
+    if ( !actor || (actor.type !== "character") || !actor.hasPlayerOwner ) continue;
+    if ( stationsForToken(t).size ) out.set(actor.uuid, actor);
+  }
+  return [...out.values()];
+}
+
+/**
+ * The bridge's Reset button (GM only). Rules: starting Tempo equals the number of players, or 0
+ * if the ship is surprised. Players are counted as player characters standing on this scene's
+ * stations. Strain carries over unless the GM ticks "Also clear Strain".
+ * @param {Scene} scene   The scene the Reset button is on.
+ */
+export async function resetStats(scene = canvas.scene) {
+  if ( !game.user.isGM ) {
+    ui.notifications.warn("Only a GM can reset Tempo.");
+    return;
+  }
+  const tempoD = statDrawing(scene, "tempo");
+  if ( !tempoD ) return ui.notifications.warn(`No drawing tagged "Tempo" on ${scene?.name}.`);
+  const crew = crewOnStations(scene);
+  const names = crew.map(a => a.name).join(", ") || "none";
+  const strainNow = readStat(scene, "strain");
+  const result = await foundry.applications.api.DialogV2.wait({
+    window: { title: "Reset Tempo" },
+    content: `<p>Players on stations: <strong>${crew.length}</strong> (${names}).</p>
+      <p>Starting Tempo is ${crew.length}, or 0 if the ship is surprised.</p>
+      ${strainNow === null ? "" : `<label><input type="checkbox" name="clearStrain"> Also clear Strain (now ${strainNow})</label>`}`,
+    buttons: [
+      { action: "normal", label: `Normal (Tempo ${crew.length})`, default: true,
+        callback: (event, button) => ({ surprised: false, clearStrain: !!button.form.elements.clearStrain?.checked }) },
+      { action: "surprised", label: "Surprised (Tempo 0)",
+        callback: (event, button) => ({ surprised: true, clearStrain: !!button.form.elements.clearStrain?.checked }) },
+      { action: "cancel", label: "Cancel" }
+    ],
+    rejectClose: false
+  });
+  if ( !result || (typeof result !== "object") ) return;
+  const tempo = result.surprised ? 0 : crew.length;
+  return enqueue(async () => {
+    await tempoD.update({ text: String(tempo) });
+    const strainD = statDrawing(scene, "strain");
+    if ( result.clearStrain && strainD ) await strainD.update({ text: "0" });
+    await ChatMessage.implementation.create({
+      content: `<div class="no-crew-card"><h3>Tempo reset</h3>
+        <p>Tempo <strong>${tempo}</strong> (${result.surprised ? "surprised" : `${crew.length} on stations`})${
+          result.clearStrain && strainD ? " &nbsp;·&nbsp; Strain <strong>0</strong>" : ""}</p></div>`,
+      speaker: { alias: shipActor(scene)?.name ?? "Bridge" },
+      flags: { [MODULE_ID]: { crewResult: true } }
+    });
+  });
+}
+
+/**
  * Nudge the scene's "Tempo" or "Strain" drawing up or down (used by the +/- tiles on the bridge
  * through Monk's Active Tiles). No chat card for the change itself; Strain still announces a
  * Mishap when it passes a multiple of the Mishap Threshold, and Disabled at max HP.
@@ -568,7 +937,7 @@ function gaugeColor(tag, value, scene) {
 /** Swap the tempo_gauge / strain_gauge tiles' images to match the current Tempo and Strain. */
 async function syncGauges(scene = canvas.scene) {
   if ( !scene ) return;
-  const hasTag = (doc, tag) => (doc.flags?.tagger?.tags ?? []).some(t => String(t).toLowerCase() === tag);
+  const hasTag = (doc, tag) => tagsOf(doc).includes(tag);
   const updates = [];
   for ( const tag of ["tempo", "strain"] ) {
     const value = readStat(scene, tag);
@@ -588,20 +957,33 @@ async function syncGauges(scene = canvas.scene) {
 
 Hooks.on("updateDrawing", (drawing, changes) => {
   if ( !isActiveGM() || !("text" in changes) ) return;
-  const tags = (drawing.flags?.tagger?.tags ?? []).map(t => String(t).toLowerCase());
+  const tags = tagsOf(drawing);
   if ( tags.includes("tempo") || tags.includes("strain") ) enqueue(() => syncGauges(drawing.parent));
 });
 Hooks.on("updateActor", (actor, changes) => {
   if ( !isActiveGM() || (actor.type !== "vehicle") ) return;
   if ( foundry.utils.hasProperty(changes, "system.attributes.hp") ) enqueue(() => syncGauges(canvas.scene));
+  // The center ship's Speed changed (redesign or edit): show the new Speed.
+  const speedChanged = foundry.utils.hasProperty(changes, `flags.${MODULE_ID}.speed`)
+    || foundry.utils.hasProperty(changes, "system.attributes.movement");
+  if ( speedChanged && (radarCenterShip(canvas.scene)?.actor?.id === actor.id) ) {
+    enqueue(() => syncSpeed(canvas.scene, { force: true }));
+  }
+});
+// A Speed display dropped onto a scene (for example with the Radar widget) fills in at once.
+Hooks.on("createDrawing", drawing => {
+  if ( isActiveGM() && tagsOf(drawing).includes("speed") ) enqueue(() => syncSpeed(drawing.parent, { force: true }));
 });
 Hooks.on("canvasReady", () => {
-  if ( isActiveGM() ) enqueue(() => syncGauges(canvas.scene));
+  if ( !isActiveGM() ) return;
+  enqueue(() => syncGauges(canvas.scene));
+  enqueue(() => syncSpeed(canvas.scene));
 });
 // On the first load the active GM isn't settled yet when canvasReady fires, so sync again at ready.
 Hooks.once("ready", () => {
   if ( !isActiveGM() || !canvas.scene ) return;
   enqueue(() => syncGauges(canvas.scene));
+  enqueue(() => syncSpeed(canvas.scene));
   if ( sceneHasStations(canvas.scene) ) enqueue(() => reconcileScene(canvas.scene));
 });
 
@@ -618,6 +1000,8 @@ Hooks.on("createChatMessage", message => {
     const c = flags.crew;
     const bits = [c.tempo ? `${c.tempo} Tempo` : null, c.strain ? `+${c.strain} Strain` : null].filter(Boolean);
     enqueue(() => applyCost(scene, c, { actor, label: `${c.action}${bits.length ? ` (${bits.join(", ")})` : ""}` }));
+    // The Helmsman's Maneuver starts the pilot's turn: Speed refills to the ship's Speed.
+    if ( c.action === "Maneuver" ) enqueue(() => syncSpeed(scene, { force: true }));
   }
 
   if ( flags.gainTempo ) {
