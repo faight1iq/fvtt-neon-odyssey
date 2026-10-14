@@ -5,7 +5,7 @@
     <img class="e-img" src="{{shipImg}}" alt="" data-action="editShipImage"
       data-tooltip="Change ship image (sheet portrait and every linked token)">
     <input class="e-name" type="text" name="name" value="{{name}}" placeholder="Name">
-    <div class="no-ss-level" data-tooltip="Ship Level: its Proficiency Bonus adds to saves, weapon damage and starting Tempo. Era base: Second Resource Rush 1, Colony Wars 3, Colonial Expansion 5…"><span class="k">Level</span><input class="lv" type="number" min="1" name="flags.fvtt-neon-odyssey.level" value="{{shipLevel}}"><span class="pb">Prof +{{shipProf}}</span></div>
+    <div class="no-ss-level" data-tooltip="Ship Level: its Proficiency Bonus adds to saves, weapon damage and starting Tempo. Era base: +1 per era (Second Resource Rush 1, Colony Wars 2, Colonial Expansion 3…)"><span class="k">Level</span><input class="lv" type="number" min="1" name="flags.fvtt-neon-odyssey.level" value="{{shipLevel}}"><span class="pb">Prof +{{shipProf}}</span></div>
     <span class="e-price">
       <input type="number" name="system.attributes.price.value" value="{{src.attributes.price.value}}" placeholder="Price">
       <select name="system.attributes.price.denomination">{{selectOptions currencyChoices selected=src.attributes.price.denomination}}</select>
@@ -136,7 +136,7 @@
 {{else}}
   {{!-- ============================== VIEW MODE ============================== --}}
   <div class="no-ss-hdr-side">
-    <div class="no-ss-level" data-tooltip="Ship Level: its Proficiency Bonus adds to saves, weapon damage and starting Tempo. Era base: Second Resource Rush 1, Colony Wars 3, Colonial Expansion 5…"><span class="k">Level</span><span class="lv">{{shipLevel}}</span><span class="pb">Prof +{{shipProf}}</span></div>
+    <div class="no-ss-level" data-tooltip="Ship Level: its Proficiency Bonus adds to saves, weapon damage and starting Tempo. Era base: +1 per era (Second Resource Rush 1, Colony Wars 2, Colonial Expansion 3…)"><span class="k">Level</span><span class="lv">{{shipLevel}}</span><span class="pb">Prof +{{shipProf}}</span></div>
     {{#if priceLabel}}<div class="no-ss-price">{{priceLabel}}</div>{{/if}}
   </div>
   <header class="no-ss-hdr">
