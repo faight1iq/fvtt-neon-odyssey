@@ -1,3 +1,8 @@
-2026/10/04-18:30:02.285 cd04 Recovering log #229
-2026/10/04-18:30:02.379 cd04 Delete type=3 #227
-2026/10/04-18:30:02.380 cd04 Delete type=0 #229
+2026/10/11-13:53:59.358 19dac Recovering log #232
+2026/10/11-13:53:59.478 19dac Delete type=0 #232
+2026/10/11-13:53:59.480 19dac Delete type=3 #231
+2026/10/11-23:51:20.603 1db38 Level-0 table #236: started
+2026/10/11-23:51:20.603 1db38 Level-0 table #236: 0 bytes OK
+2026/10/11-23:51:20.615 1db38 Delete type=0 #234
+2026/10/11-23:51:20.647 1db38 Manual compaction at level-0 from '!actors!0HN78B2XX2ObFslK' @ 72057594037927935 : 1 .. '!folders!xmtfjS7mqZtEaOPI' @ 0 : 0; will stop at (end)
+2026/10/11-23:51:20.648 1db38 Manual compaction at level-1 from '!actors!0HN78B2XX2ObFslK' @ 72057594037927935 : 1 .. '!folders!xmtfjS7mqZtEaOPI' @ 0 : 0; will stop at (end)

@@ -4,15 +4,40 @@
 //
 // Actor flags:  descriptor (string), draft (number), landing (string, comma list),
 //               cargoSqft (number), mishaps (array of Actor UUIDs)
-// Weapon flags: crew (number), rangeBand (string: Point Blank | Short | Medium | Long | Extreme)
+// Weapon flags: crew (number), rangeBand (string), facing (bow | port | starboard | aft)
+// Designed ships (v2 components) also carry the flags written by starship-designer.mjs.
 
-import { SLOTS, slotOf, isDesigned, getParts, addComponent, recalculate } from "./starship-designer.mjs";
+import { stationLocation, partPower } from "./starship-calc.mjs";
+import { SLOT_DEFS, FACINGS, GUNNER_FACINGS, LOCATIONS, needsStation, needsSeat, setStation, componentLibrary, facingLabel, isDesigned, getParts, legacyParts, addComponent, recalculate, askFacing, ammoPools, weaponAmmo, rearm } from "./starship-designer.mjs";
 import { MISHAP_TIERS, possibleMishaps, shipStrain, shipPasses, tierForPasses } from "./mishap-links.mjs";
 
 const MODULE_ID = "fvtt-neon-odyssey";
 const HUD_PANEL_NAME = "hud-sheet-panel";   // Drawing text on the HUD scene that marks the panel
 const RANGE_BANDS = ["Point Blank", "Short", "Medium", "Long", "Extreme"];
 const { HandlebarsApplicationMixin } = foundry.applications.api;
+
+const STAT_LABELS = {
+  ac: "AC", mt: "MT", speed: "Speed", str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA",
+  hpBonus: "HP", hpPct: "HP", hitDie: "Hit Die d", hitDice: "Hit Dice", crew: "Crew", passengers: "Passengers", berths: "Berths",
+  cargo: "Cargo", power: "Power", compartments: "Compartments", cost: "Cost", shieldAc: "Shield AC",
+  shieldCharges: "Charges/facing", ablativeHp: "Ablative HP", ablativeRegen: "Regen"
+};
+/** Hover text for an installed component: its stat effects, one per line. */
+function partTooltip(c) {
+  const fmt = (k, v) => {
+    if ( k === "cost" ) return `${STAT_LABELS[k]} ${Number(v).toLocaleString()}`;
+    if ( ["hitDie", "hitDice"].includes(k) ) return `${STAT_LABELS[k]}${k === "hitDie" ? "" : " "}${v}`;
+    if ( k === "compartments" && v > -1 && v < 0 ) return `Compartments ${Math.round(v * 100)}% of class`;
+    if ( k === "hpPct" ) return `HP ${v > 0 ? "+" : ""}${Math.round(v * 100)}%`;
+    if ( ["str", "dex", "con", "int", "wis", "cha"].includes(k) && !["shipClass", "material"].includes(c.slot) ) return `${STAT_LABELS[k]} ${v}`;
+    return `${STAT_LABELS[k] ?? k} ${v > 0 ? "+" : ""}${v}`;
+  };
+  const lines = Object.entries(c.stats ?? {}).filter(([k]) => STAT_LABELS[k]).map(([k, v]) => fmt(k, v));
+  if ( c.size ) lines.unshift(`Size ${c.size}`);
+  if ( c.stationRoles?.length ) lines.push(`Station: ${c.stationRoles.join(" + ")}`);
+  if ( c.mishaps?.length ) lines.push(`Mishaps: ${c.mishaps.join(", ")}`);
+  return lines.join("<br>");
+}
 const { ActorSheetV2 } = foundry.applications.sheets;
 
 export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
@@ -37,7 +62,8 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       openMishap: StarshipSheet.#onOpenMishap,
       removeMishap: StarshipSheet.#onRemoveMishap,
       recalculate: StarshipSheet.#onRecalculate,
-      editShipImage: StarshipSheet.#onEditShipImage
+      editShipImage: StarshipSheet.#onEditShipImage,
+      rearm: StarshipSheet.#onRearm
     }
   };
 
@@ -127,9 +153,17 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     const mishaps = (await possibleMishaps(actor, tier)).filter(m => designed || m.manual);
     const mishapTier = strain === null ? "" : `${MISHAP_TIERS[tier]} at Strain ${strain}`;
 
+    // Live component data (the compendium), as the calculator uses.
+    const lib = await componentLibrary();
+
     // Weapon Stations
     const weapons = actor.items.filter(i => i.type === "weapon").map(item => {
       const iflags = item.flags[MODULE_ID] ?? {};
+      const own = iflags.component?.v === 2 ? iflags.component : null;
+      const comp = own ? (lib.byId.get(`${own.slot}|${own.id}`) ?? own) : null;
+      // v2: the draw for this ship's size (power scales with the part's compartments).
+      const pwr = comp ? Math.abs(partPower(comp, Number(flags.analysis?.compartments?.budget) || 0)) || null
+        : (iflags.component?.power ?? null);
       const attack = item.system.activities?.getByType?.("attack")?.[0];
       const damages = attack?.labels?.damage ?? [];
       const damage = damages.map(d => d.label ?? d.formula).filter(Boolean).join(" + ");
@@ -141,28 +175,54 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
         id: item.id,
         name: item.name,
         qty: item.system.quantity ?? 1,
-        crew: iflags.crew ?? null,
-        power: iflags.component?.power ?? null,
-        powerTotal: iflags.component?.power != null ? iflags.component.power * (item.system.quantity ?? 1) : null,
+        crew: iflags.crew ?? comp?.stats?.crew ?? null,
+        power: pwr,
+        powerTotal: pwr != null ? pwr * (item.system.quantity ?? 1) : null,
+        facing: iflags.facing ?? "",
+        crewed: needsStation(comp), station: iflags.station?.location ?? "",
+        facingLabel: iflags.facing ? iflags.facing[0].toUpperCase() + iflags.facing.slice(1) : "",
+        size: comp?.size ?? "",
         multi: (item.system.quantity ?? 1) > 1,
         rangeBand: iflags.rangeBand ?? "",
         line: parts.join(" · "),
+        ammoText: (a => a ? `${a.shots} shot${a.shots === 1 ? "" : "s"} left (${a.size} magazine ${a.left}/${a.capacity})` : "")(weaponAmmo(actor, item.id)),
+        ammoOut: (a => !!a && a.shots < 1)(weaponAmmo(actor, item.id)),
         hasAttack: !!attack
       };
     });
 
-    // Designer slots (edit mode)
+    // Designer slots (edit mode), checks and analysis (v2 components)
     const parts = getParts(actor);
-    const slots = Object.entries(SLOTS).filter(([k]) => k !== "weapon").map(([key, slot]) => {
-      const installed = parts.filter(p => slotOf(p.c) === key).map(p => ({ id: p.item.id, name: p.item.name, qty: p.qty }));
-      return { key, label: slot.label, hint: slot.hint ?? "", stack: slot.stack, installed, open: slot.max - installed.length > 0 && !(slot.max === 1 && installed.length) };
+    // The Ship Class comes from keel, beam and draft, so it has no slot.
+    const slots = Object.entries(SLOT_DEFS).filter(([k]) => !["weapon", "shipClass"].includes(k)).map(([key, def]) => {
+      const installed = parts.filter(p => p.c.slot === key).map(p => ({
+        id: p.id, name: p.name, qty: p.qty, tip: partTooltip(p.c),
+        located: !!p.c.stationRoles?.length,
+        location: p.c.stationRoles?.length ? (stationLocation(p.location, p.facing, p.c.stationRoles[0]) ?? "") : "",
+        crewed: needsStation(p.c), station: p.station ?? "", auto: p.auto,
+        seat: needsSeat(p.c), seatAuto: p.station === "none"
+      }));
+      return { key, label: def.label, stack: def.qty, installed, open: installed.length < def.max || def.max > 1 };
     });
-    const design = flags.design ?? {};
-    const missingDims = !(Number(src.traits.keel?.value) > 0 && Number(src.traits.beam?.value) > 0 && Number(flags.draft) > 0);
-    const missingBuilder = !String(design.builtBy ?? "").trim();
-    const tonsLabel = w.value != null ? dnd5e.utils.formatWeight(w.value, w.units ?? "tn", { unitDisplay: "long" }) : "";
-    const sizeName = flags.sizeName ?? "";
+    const analysis = flags.analysis ?? null;
+    const checks = analysis?.checks ?? [];
+    const warnings = checks.filter(c => !c.ok);
+    const legacy = legacyParts(actor).map(i => i.name);
+    const shield = flags.shield ?? {};
+    const shieldLine = [
+      shield.charges ? `Deflector ${shield.acRaised} AC raised, ${shield.charges} charges per facing` : "",
+      shield.ablativeHp ? `Ablative field ${shield.ablativeHp} HP, regen ${shield.ablativeRegen}` : ""
+    ].filter(Boolean).join(" · ");
+    const pools = ammoPools(actor);
+    const torpedoLine = Object.entries(analysis?.ammo?.torpedoes ?? {}).filter(([, t]) => t.launchers)
+      .map(([z, t]) => `${z} torpedoes ${t.loaded} loaded + ${t.reloads} reload${t.reloads === 1 ? "" : "s"}`);
+    const ammoLine = Object.entries(pools).map(([z, p]) => `${z} ${p.left}/${p.capacity} (${Math.floor(p.left / 6)} missiles or ${p.left} rounds)`)
+      .concat(torpedoLine)
+      .concat(Object.entries(analysis?.ammo?.racks ?? {}).filter(([, t]) => t.racks)
+        .map(([z, t]) => `${z} missile racks ${t.loaded} volleys + ${t.reloads} in magazines`)).join(" · ");
     const powerSurplus = flags.powerSurplus ?? null;
+    const design = flags.design ?? {};
+    const sizeName = flags.sizeName ?? "";
 
     // Choice lists for edit mode
     const toChoices = (obj, key) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, L(v[key] ?? v)]));
@@ -173,11 +233,19 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
         ? (actor.prototypeToken?.texture?.src || actor.img) : actor.img,
       actor, flags, src,
       editing: this.isEditing,
-      designed, slots, design, powerSurplus, missingDims, missingBuilder, tonsLabel, sizeName, powerNegative: (powerSurplus ?? 0) < 0,
+      designed, slots, design, powerSurplus, sizeName, powerNegative: (powerSurplus ?? 0) < 0,
+      analysis, checks, warnings, legacy, shieldLine, ammoLine, facings: FACINGS,
+      locations: LOCATIONS.map(l => ({ value: l.key, label: l.label })),
+      hitDiceLabel: analysis?.hitDice ? `${analysis.hitDice}d${analysis.hitDie}` : "",
+      tonsText: analysis?.tons ? Number(analysis.tons).toLocaleString() : "",
+      prisoners: analysis?.prisoners ?? 0,
       isGM: game.user.isGM, owner: actor.isOwner,
       name: actor.name, priceLabel, line1, line2,
-      crewLabel: `${crew}/${crew + pax}`,
-      cargo: flags.cargoSqft ? `${Number(flags.cargoSqft).toLocaleString()} sqft` : "",
+      shipLevel: Math.max(1, Math.floor(Number(flags.level) || 1)),
+      shipProf: Math.ceil(Math.max(1, Math.floor(Number(flags.level) || 1)) / 4) + 1,
+      crewLabel: designed ? `${crew}${pax ? ` + ${pax} passengers` : ""}${analysis ? `, ${analysis.berths} berths` : ""}` : `${crew}/${crew + pax}`,
+      cargo: designed ? (flags.cargo ? `${Number(flags.cargo).toLocaleString()}` : "")
+        : (flags.cargoSqft ? `${Number(flags.cargoSqft).toLocaleString()} sqft` : ""),
       ac: sys.attributes.ac?.value ?? sys.attributes.ac?.flat ?? "",
       hp: sys.attributes.hp,
       mt: sys.attributes.hp?.mt ?? "",
@@ -229,6 +297,15 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
     if ( root && this.isEditable ) {
       root.addEventListener("dragover", ev => ev.preventDefault());
       root.addEventListener("drop", ev => this.#onDrop(ev));
+    }
+
+    // Station pickers on crewed systems: use or add the station at that location.
+    for ( const sel of el.querySelectorAll("select[data-station-for]") ) {
+      sel.addEventListener("change", ev => {
+        ev.stopPropagation();
+        const item = this.actor.items.get(sel.dataset.stationFor);
+        if ( item && sel.value ) setStation(this.actor, item, sel.value);
+      });
     }
 
     // Weapon station fields edit the item, not the vehicle.
@@ -387,6 +464,11 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       }
     });
     return picker.browse();
+  }
+
+  static async #onRearm() {
+    await rearm(this.actor);
+    ui.notifications.info(`${this.actor.name}: magazines refilled.`);
   }
 
   static async #onRecalculate() {

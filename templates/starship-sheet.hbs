@@ -5,16 +5,17 @@
     <img class="e-img" src="{{shipImg}}" alt="" data-action="editShipImage"
       data-tooltip="Change ship image (sheet portrait and every linked token)">
     <input class="e-name" type="text" name="name" value="{{name}}" placeholder="Name">
+    <div class="no-ss-level" data-tooltip="Ship Level: its Proficiency Bonus adds to saves, weapon damage and starting Tempo. Era base: Second Resource Rush 1, Colony Wars 3, Colonial Expansion 5…"><span class="k">Level</span><input class="lv" type="number" min="1" name="flags.fvtt-neon-odyssey.level" value="{{shipLevel}}"><span class="pb">Prof +{{shipProf}}</span></div>
     <span class="e-price">
       <input type="number" name="system.attributes.price.value" value="{{src.attributes.price.value}}" placeholder="Price">
       <select name="system.attributes.price.denomination">{{selectOptions currencyChoices selected=src.attributes.price.denomination}}</select>
     </span>
   </header>
-  <div class="e-row">
+  {{#unless designed}}<div class="e-row">
     <select name="system.traits.size" data-tooltip="Size">{{selectOptions sizeChoices selected=src.traits.size}}</select>
     <input class="grow" type="text" name="flags.fvtt-neon-odyssey.descriptor" value="{{flags.descriptor}}"
       placeholder="Light, Titanium, Antimatter-Powered, Graviton Starship Of Terra Design">
-  </div>
+  </div>{{else}}<div class="no-ss-desc"><div>{{line1}}</div></div>{{/unless}}
   {{#unless designed}}
   <div class="e-row">
     <label>Weight</label><input class="n" type="number" name="system.traits.weight.value" value="{{src.traits.weight.value}}">
@@ -30,48 +31,72 @@
   <div class="e-row">
     <label>Built By</label><input class="grow" type="text" name="flags.fvtt-neon-odyssey.design.builtBy" value="{{design.builtBy}}" placeholder="Terra">
     <label>Used By</label><input class="grow" type="text" name="flags.fvtt-neon-odyssey.design.usedBy" value="{{design.usedBy}}">
-    <label>Cargo</label><input class="n" type="number" min="0" name="flags.fvtt-neon-odyssey.design.cargo" value="{{design.cargo}}" data-tooltip="5-ft squares">
+    {{#unless designed}}<label>Cargo</label><input class="n" type="number" min="0" name="flags.fvtt-neon-odyssey.design.cargo" value="{{design.cargo}}" data-tooltip="5-ft squares">{{/unless}}
   </div>
 
   <div class="no-ss-rule"></div>
   <section class="no-ss-design">
     <div class="no-ss-sec">Design
-      <span class="hint">Drop Starship Components here{{#if designed}} ·
-        <span class="{{#if powerNegative}}neg{{/if}}">Power Surplus {{powerSurplus}}</span>
+      <span class="hint">Drag Starship Components here{{#if designed}} ·
+        <span class="{{#if powerNegative}}neg{{/if}}">Power {{powerSurplus}}</span>
         <a data-action="recalculate" data-tooltip="Recalculate"><i class="fa-solid fa-rotate"></i></a>{{/if}}</span>
     </div>
     <div class="e-row dims">
       <label>Keel</label><input class="n" type="number" min="0" name="system.traits.keel.value" value="{{src.traits.keel.value}}" data-tooltip="Length (ft)">
       <label>Beam</label><input class="n" type="number" min="0" name="system.traits.beam.value" value="{{src.traits.beam.value}}" data-tooltip="Width (ft)">
       <label>Draft</label><input class="n" type="number" min="0" name="flags.fvtt-neon-odyssey.draft" value="{{flags.draft}}" data-tooltip="Height (ft)">
-      {{#if designed}}<span class="sub">= {{tonsLabel}}, {{sizeName}}</span>{{/if}}
+      <label>Troops</label><input class="n" type="number" min="0" name="flags.fvtt-neon-odyssey.troops" value="{{flags.troops}}" data-tooltip="Embarked troops: they need berths">
+      {{#if tonsText}}<span class="sub">= {{tonsText}} tons, {{sizeName}}</span>{{else}}<span class="sub">sets the ship's size</span>{{/if}}
     </div>
-    {{#if designed}}{{#if missingDims}}<div class="no-ss-warn"><i class="fa-solid fa-triangle-exclamation"></i> Enter keel, beam and draft. Tonnage, size, HP, damage threshold and cost all come from them.</div>{{/if}}
-    {{#if missingBuilder}}<div class="no-ss-warn"><i class="fa-solid fa-triangle-exclamation"></i> Enter Built By for the description.</div>{{/if}}{{/if}}
+    {{#if legacy.length}}<div class="no-ss-warn"><i class="fa-solid fa-box-archive"></i> Legacy (v1) parts, ignored by the designer: {{#each legacy}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}. Replace them with Design Studio components.</div>{{/if}}
     <div class="slots">
       {{#each slots}}
-      <div class="slot"><span class="sl">{{label}}</span>
+      <div class="slot" data-slot="{{key}}"><span class="sl">{{label}}</span>
         {{#each installed}}
-        <span class="part" data-item-id="{{id}}">{{name}}
+        <span class="part" data-item-id="{{id}}" data-tooltip-html="{{tip}}" data-tooltip="{{tip}}">{{name}}
           {{#if ../stack}}<input class="n q" type="number" min="1" value="{{qty}}" data-item-field="system.quantity" data-tooltip="Quantity">{{/if}}
+          {{#if located}}<select class="fc" data-item-field="flags.fvtt-neon-odyssey.location" data-tooltip="Where this station is{{#if auto}} (added for a system){{/if}}">
+            <option value="" {{#unless location}}selected{{/unless}}>where?</option>
+            {{#each @root.locations}}<option value="{{value}}" {{#if (eq value ../location)}}selected{{/if}}>{{label}}</option>{{/each}}
+          </select>{{/if}}
+          {{#if seat}}<select class="fc" data-item-field="flags.fvtt-neon-odyssey.station.location" data-tooltip="Crewed or automated">
+            <option value="habitat" {{#unless seatAuto}}selected{{/unless}}>Crewed</option>
+            <option value="none" {{#if seatAuto}}selected{{/if}}>Automated</option>
+          </select>{{/if}}
+          {{#if crewed}}<select class="fc" data-station-for="{{id}}" data-tooltip="Station for this system">
+            <option value="" {{#unless station}}selected{{/unless}}>station?</option>
+            {{#each @root.locations}}<option value="{{value}}" {{#if (eq value ../station)}}selected{{/if}}>{{label}}</option>{{/each}}
+            <option value="none" {{#if (eq station "none")}}selected{{/if}}>Automated</option>
+          </select>{{/if}}
+          <a data-action="openItem" data-tooltip="Open"><i class="fa-solid fa-eye"></i></a>
           <a data-action="deleteItem" data-tooltip="Remove"><i class="fa-solid fa-xmark"></i></a></span>
         {{/each}}
-        {{#if open}}<span class="drop">Drop {{#if hint}}{{hint}}{{else}}{{label}}{{/if}} here</span>{{/if}}
+        {{#if open}}<span class="drop">Drop {{label}}</span>{{/if}}
       </div>
       {{/each}}
     </div>
+    {{#if designed}}
+    <div class="no-ss-checks">
+      {{#each checks}}
+      <div class="chk {{#if ok}}ok{{else}}warn{{/if}}"><i class="fa-solid {{#if ok}}fa-check{{else}}fa-triangle-exclamation{{/if}}"></i>
+        <span class="cl">{{label}}</span> <span class="cd">{{detail}}</span></div>
+      {{/each}}
+      <div class="chk note"><i class="fa-solid fa-circle-info"></i> Draft checks: warnings only. Rate of Fire, torpedoes, hangar fit and materials cost are not modeled yet.</div>
+    </div>
+    {{/if}}
   </section>
 
   <div class="no-ss-rule"></div>
   {{#if designed}}
   <div class="no-ss-stats">
-    <div class="l">Crew</div><div class="v">{{crewLabel}} <span class="sub">+ pax</span>
-      <input class="n" type="number" name="system.passengers.max" value="{{src.passengers.max}}" data-tooltip="Passengers"></div>
-    <div class="l">Cargo</div><div class="v">{{cargo}}</div>
-    <div class="l">Armor Class</div><div class="v full">{{ac}}</div>
+    <div class="l">Crew</div><div class="v full">{{crewLabel}}</div>
+    <div class="l">Cargo</div><div class="v full">{{cargo}}{{#if prisoners}} <span class="sub">· {{prisoners}} prisoners</span>{{/if}}</div>
+    <div class="l">Armor Class</div><div class="v full">{{ac}}{{#if analysis.acrobatics}} <span class="sub">· Acrobatics {{analysis.acrobatics}}</span>{{/if}}</div>
+    {{#if shieldLine}}<div class="l">Shields</div><div class="v full">{{shieldLine}}</div>{{/if}}
+    {{#if ammoLine}}<div class="l">Ammo</div><div class="v full">{{ammoLine}}{{#if owner}} <a data-action="rearm" data-tooltip="Refill every magazine"><i class="fa-solid fa-box-open"></i> Rearm</a>{{/if}}</div>{{/if}}
     <div class="l">Hit Points</div><div class="v full">
       <input class="n" type="number" name="system.attributes.hp.value" value="{{src.attributes.hp.value}}"> / {{hp.max}}
-      <span class="sub">(damage threshold {{hp.dt}})</span></div>
+      {{#if hitDiceLabel}}<span class="sub">({{hitDiceLabel}})</span>{{/if}}</div>
     <div class="l">Mishap Threshold</div><div class="v full">{{mt}}</div>
     <div class="l">Speed</div><div class="v full">{{speed}} <span class="sub">· calculated from components</span></div>
   </div>
@@ -110,13 +135,17 @@
 
 {{else}}
   {{!-- ============================== VIEW MODE ============================== --}}
+  <div class="no-ss-hdr-side">
+    <div class="no-ss-level" data-tooltip="Ship Level: its Proficiency Bonus adds to saves, weapon damage and starting Tempo. Era base: Second Resource Rush 1, Colony Wars 3, Colonial Expansion 5…"><span class="k">Level</span><span class="lv">{{shipLevel}}</span><span class="pb">Prof +{{shipProf}}</span></div>
+    {{#if priceLabel}}<div class="no-ss-price">{{priceLabel}}</div>{{/if}}
+  </div>
   <header class="no-ss-hdr">
     <h1>{{name}}</h1>
-    {{#if priceLabel}}<div class="no-ss-price">{{priceLabel}}</div>{{/if}}
   </header>
   <div class="no-ss-desc">
     {{#if line1}}<div>{{line1}}</div>{{/if}}
     {{#if line2}}<div>{{line2}}</div>{{/if}}
+    {{#if owner}}{{#if warnings.length}}<div class="no-ss-warnline" data-action="toggleMode" data-tooltip="Open edit mode to see the design checks"><i class="fa-solid fa-triangle-exclamation"></i> {{warnings.length}} design warning{{#unless (eq warnings.length 1)}}s{{/unless}} (draft)</div>{{/if}}{{/if}}
   </div>
 
   <div class="no-ss-rule"></div>
@@ -124,6 +153,8 @@
     <div class="l">Crew</div><div class="v">{{crewLabel}}</div>
     <div class="l">Cargo</div><div class="v">{{cargo}}</div>
     <div class="l">Armor Class</div><div class="v full">{{ac}}</div>
+    {{#if shieldLine}}<div class="l">Shields</div><div class="v full">{{shieldLine}}</div>{{/if}}
+    {{#if ammoLine}}<div class="l">Ammo</div><div class="v full">{{ammoLine}}{{#if owner}} <a data-action="rearm" data-tooltip="Refill every magazine"><i class="fa-solid fa-box-open"></i> Rearm</a>{{/if}}</div>{{/if}}
     <div class="l">Hit Points</div>
     <div class="v full">{{hp.value}} / {{hp.max}}{{#if hp.dt}} <span class="sub">(damage threshold {{hp.dt}})</span>{{/if}}</div>
     <div class="l">Mishap Threshold</div><div class="v full">{{mt}}</div>
@@ -167,6 +198,17 @@
       <div class="wbody">
         <div class="wname">{{name}}{{#if power}} <span class="pwr" data-tooltip="Power required"><i class="fa-solid fa-bolt"></i> {{power}}{{#if multi}} each · {{powerTotal}} total{{/if}}</span>{{/if}}</div>
         <div class="e-row tight">
+          <label>Facing</label>
+          <select data-item-field="flags.fvtt-neon-odyssey.facing">
+            <option value="" {{#unless facing}}selected{{/unless}}>(none)</option>
+            {{#each @root.facings}}<option value="{{this}}" {{#if (eq this ../facing)}}selected{{/if}}>{{this}}</option>{{/each}}
+          </select>
+          {{#if crewed}}<label>Station</label>
+          <select data-station-for="{{id}}">
+            <option value="" {{#unless station}}selected{{/unless}}>(choose)</option>
+            {{#each @root.locations}}<option value="{{value}}" {{#if (eq value ../station)}}selected{{/if}}>{{label}}</option>{{/each}}
+            <option value="none" {{#if (eq station "none")}}selected{{/if}}>Automated</option>
+          </select>{{/if}}
           <label>Crew</label><input class="n" type="number" min="0" value="{{crew}}" data-item-field="flags.fvtt-neon-odyssey.crew">
           <label>Range</label>
           <select data-item-field="flags.fvtt-neon-odyssey.rangeBand">
@@ -184,9 +226,10 @@
     <div class="no-ss-weap" data-item-id="{{id}}" data-action="useWeapon">
       <div class="qty">{{qty}}</div>
       <div class="wbody">
-        <div class="wname">{{name}}{{#if crew}} <span class="crew">({{crew}} Crew)</span>{{/if}}
+        <div class="wname">{{name}}{{#if facingLabel}} <span class="facing">{{facingLabel}}</span>{{/if}}{{#if crew}} <span class="crew">({{crew}} Crew)</span>{{/if}}
           {{#if power}}<span class="pwr" data-tooltip="Power required"><i class="fa-solid fa-bolt"></i> {{power}}{{#if multi}} each · {{powerTotal}} total{{/if}}</span>{{/if}}</div>
         <div class="wline">{{line}}</div>
+        {{#if ammoText}}<div class="wline{{#if ammoOut}} out{{/if}}"><i class="fa-solid fa-box"></i> {{ammoText}}</div>{{/if}}
       </div>
       {{#if hasAttack}}
       <div class="btns">

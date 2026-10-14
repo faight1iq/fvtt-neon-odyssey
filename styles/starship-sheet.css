@@ -35,6 +35,18 @@
   text-shadow: 0 0 6px rgba(255, 154, 60, .55);
 }
 .no-ss-price { font-weight: bold; font-size: 13px; white-space: nowrap; }
+.no-ss-hdr h1 { flex: 1; }
+.no-ss-hdr-side { float: right; margin: 0 0 4px 10px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.no-ss-hdr-side + .no-ss-hdr ~ .no-ss-rule { clear: both; }
+.no-ss .no-ss-level {
+  flex: 0 0 auto; align-self: center; display: flex; flex-direction: column; align-items: center;
+  min-width: 46px; padding: 2px 6px; border: 1px solid var(--ss-line); border-radius: 4px;
+  background: rgba(0, 0, 0, .35); line-height: 1.1;
+}
+.no-ss .no-ss-level .k { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--ss-muted); }
+.no-ss .no-ss-level .lv { font-family: "Modesto Condensed", "Roboto Slab", serif; font-size: 20px; font-weight: bold; color: var(--ss-accent); }
+.no-ss .no-ss-level input.lv { width: 40px; height: 22px; text-align: center; padding: 0; }
+.no-ss .no-ss-level .pb { font-size: 9px; color: var(--ss-muted); white-space: nowrap; }
 .no-ss-desc { font-style: italic; font-size: 11px; color: var(--ss-muted); margin-top: 2px; line-height: 1.45; }
 .no-ss-rule { height: 1px; background: linear-gradient(90deg, var(--ss-line), rgba(240, 138, 36, .15)); margin: 6px 0; }
 
@@ -150,3 +162,21 @@
 }
 .chat-message .no-crew-card p { margin: 0 0 2px; font-size: inherit; }
 .chat-message .no-crew-card .no-crew-alert { color: #c0392b; }
+
+/* ---------- Designer v2: checks panel, facings ---------- */
+.no-ss-checks { margin-top: 5px; display: grid; grid-template-columns: 1fr; gap: 1px; font-size: 10.5px; }
+.no-ss-checks .chk { display: flex; gap: 5px; align-items: baseline; }
+.no-ss-checks .chk i { width: 12px; text-align: center; }
+.no-ss-checks .chk.ok { color: var(--ss-muted); }
+.no-ss-checks .chk.ok i { color: #5ad18a; }
+.no-ss-checks .chk.warn { color: #ffcf5a; }
+.no-ss-checks .chk.note { color: var(--ss-muted); font-style: italic; }
+.no-ss-checks .cl { font-weight: bold; min-width: 108px; }
+.no-ss .no-ss-warnline { color: #ffcf5a; font-size: 10.5px; cursor: pointer; }
+.no-ss-weap .facing {
+  font-weight: normal; font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
+  border: 1px solid var(--ss-chip-line); border-radius: 3px; padding: 0 4px; margin-left: 4px; color: var(--ss-cyan);
+}
+.no-ss-design .slot[data-slot="habitat"] { grid-column: 1 / -1; }
+.no-ss-design .part select.fc { height: 16px; font-size: 10px; width: auto; padding: 0 2px; }
+.no-starship-sheet .wline.out { color: #e05050; }

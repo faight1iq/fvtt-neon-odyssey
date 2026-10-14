@@ -1,7 +1,3 @@
-2026/10/11-13:53:57.997 1a084 Recovering log #242
-2026/10/11-13:53:58.093 1a084 Delete type=0 #242
-2026/10/11-13:53:58.095 1a084 Delete type=3 #241
-2026/10/11-23:51:20.225 1db38 Level-0 table #246: started
-2026/10/11-23:51:20.225 1db38 Level-0 table #246: 0 bytes OK
-2026/10/11-23:51:20.237 1db38 Delete type=0 #244
-2026/10/11-23:51:20.375 1db38 Manual compaction at level-0 from '!folders!068ad6acf07e9ad4' @ 72057594037927935 : 1 .. '!items!phbbgSoldier0000' @ 0 : 0; will stop at (end)
+2026/10/11-23:54:38.725 1b12c Recovering log #245
+2026/10/11-23:54:38.815 1b12c Delete type=3 #243
+2026/10/11-23:54:38.815 1b12c Delete type=0 #245

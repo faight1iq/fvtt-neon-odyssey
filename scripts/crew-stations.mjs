@@ -41,8 +41,19 @@ export const COMBINED_STATIONS = {
   copilot: ["helmsman", "navigator"]
 };
 
-/** Role keys a station flag grants: itself, or the roles of a combined station. */
-const rolesForStation = key => COMBINED_STATIONS[key] ?? (ROLE_ITEMS[key] ? [key] : []);
+/**
+ * Seats with a crew card but no Crew Role features of their own (they get Any Station):
+ * Cook and Medic.
+ */
+const SEAT_ROLES = ["cook", "medic"];
+
+/**
+ * Role keys a station flag grants: itself, or the roles of a combined station.
+ * Deck Crew (John, 2026-10-12) can always Gain Tempo and Correct mishaps: it grants Any Station
+ * only, and tokens on it keep their size.
+ */
+const rolesForStation = key => key === "deck" ? ["any"]
+  : COMBINED_STATIONS[key] ?? ((ROLE_ITEMS[key] || SEAT_ROLES.includes(key)) ? [key] : []);
 
 const isActiveGM = () => game.users.activeGM?.isSelf ?? false;
 
@@ -52,7 +63,7 @@ const isActiveGM = () => game.users.activeGM?.isSelf ?? false;
 
 Hooks.once("init", () => {
   CONFIG.DND5E.featureTypes[FEATURE_TYPE] = { label: "Crew Role" };
-  game.modules.get(MODULE_ID).crew = { reconcileScene, reconcileActor, readStat, applyCost, adjustStat, resetStats, crewOnStations, syncSpeed, radarCenterShip, shipSpeed, adjustSpeed, steerForward, steerTurn, ROLE_ITEMS, COMBINED_STATIONS };
+  game.modules.get(MODULE_ID).crew = { reconcileScene, reconcileActor, readStat, applyCost, adjustStat, resetStats, crewOnStations, syncSpeed, radarCenterShip, shipSpeed, adjustSpeed, steerForward, steerTurn, steerShip, ROLE_ITEMS, COMBINED_STATIONS };
 });
 
 /* -------------------------------------------- */
@@ -206,7 +217,8 @@ export async function reconcileActor(actor, scene, moved = null) {
     const pos = (moved && moved.id === t.id) ? moved : {};
     const here = stationsForToken(t, pos);
     for ( const k of here ) wanted.add(k);
-    await syncTokenSize(t, here.size > 0);
+    // Only real stations enlarge the token; Deck Crew ("any" alone) keeps it the same size.
+    await syncTokenSize(t, [...here].some(k => k !== "any"));
   }
   if ( wanted.size ) wanted.add("any");
 
@@ -218,7 +230,7 @@ export async function reconcileActor(actor, scene, moved = null) {
   if ( toDelete.length ) await actor.deleteEmbeddedDocuments("Item", toDelete);
   if ( missing.length ) {
     const pack = game.packs.get(PACK_ID);
-    const docs = await Promise.all(missing.map(k => pack?.getDocument(ROLE_ITEMS[k])));
+    const docs = await Promise.all(missing.filter(k => ROLE_ITEMS[k]).map(k => pack?.getDocument(ROLE_ITEMS[k])));
     const data = docs.filter(Boolean).map(d => {
       const obj = game.items.fromCompendium(d, { keepId: false });
       foundry.utils.setProperty(obj, "flags.core.sourceId", d.uuid);
@@ -254,6 +266,8 @@ const sceneHasViewscreen = scene => sceneHasFlag(scene, "viewscreen");
 
 /** Size of a ship token on the radar, in grid squares. */
 const RADAR_SIZE = 0.5;
+/** The crew's own ship, placed at the radar's center by the HUD builder, is drawn a little larger. */
+const RADAR_SELF_SIZE = 1;
 
 /** Radar glow colors by token disposition: [base color, oscillation color]. */
 const RADAR_COLORS = {
@@ -339,10 +353,11 @@ function flaggedRegionCenter(scene, flag) {
 async function enterRadar(tokenDoc) {
   const grid = tokenDoc.parent.grid.size;
   const src = tokenDoc._source;
+  const size = tokenDoc.getFlag(MODULE_ID, "radarSelf") ? RADAR_SELF_SIZE : RADAR_SIZE;
   await tokenDoc.update({
-    x: src.x + ((src.width - RADAR_SIZE) * grid) / 2,
-    y: src.y + ((src.height - RADAR_SIZE) * grid) / 2,
-    width: RADAR_SIZE, height: RADAR_SIZE,
+    x: src.x + ((src.width - size) * grid) / 2,
+    y: src.y + ((src.height - size) * grid) / 2,
+    width: size, height: size,
     [`flags.${MODULE_ID}.radarSize`]: { width: src.width, height: src.height }
   }, { animate: false, neonOdysseyResize: true });
   if ( globalThis.TokenMagic ) await TokenMagic.addUpdateFilters(tokenDoc, radarGlow(tokenDoc));
@@ -455,7 +470,12 @@ async function syncShipDisplay(tokenDoc) {
   if ( onRadar && !inRadar ) { if ( superseded() ) return; await leaveRadar(tokenDoc); moveId = tokenDoc.movement?.id; }
   if ( onView && !inView ) { if ( superseded() ) return; await leaveViewscreen(tokenDoc); moveId = tokenDoc.movement?.id; }
   if ( superseded() ) return;
-  if ( inView && !onView ) await enterViewscreen(tokenDoc);
+  if ( onView && !inView ) Hooks.callAll(`${MODULE_ID}.viewscreenLeave`, tokenDoc);
+  if ( inView && !onView ) {
+    await enterViewscreen(tokenDoc);
+    // ship-hud.mjs builds the bridge HUD around the display.
+    Hooks.callAll(`${MODULE_ID}.viewscreenEnter`, tokenDoc);
+  }
   else if ( inRadar && !onRadar ) await enterRadar(tokenDoc);
   // A ship arriving on or leaving the viewscreen changes whose max HP the Strain gauge uses.
   if ( (inView !== onView) ) await syncGauges(scene);
@@ -645,6 +665,149 @@ export async function steerTurn(direction, scene = canvas.scene) {
 }
 
 /* -------------------------------------------- */
+/*  Other ships' helm (radar)                   */
+/* -------------------------------------------- */
+// John, 2026-10-12: click a ship on the radar (GM) to steer it with Left / Forward / Right, using
+// that ship's own Speed and the same costs as the pilot (bands 1, 2, 4, 8, 16; facings 1, 2, 3...).
+// The ship's nose follows its token rotation (0 = toward the top of the radar). Its Speed left
+// this turn is kept on the token (flags.fvtt-neon-odyssey.helm) and refills each combat round,
+// or with the panel's New Turn button.
+
+/** This turn's helm state for a radar ship, refilled when the combat round has changed. */
+function helmState(tokenDoc) {
+  const max = shipSpeed(tokenDoc.actor);
+  const round = game.combat?.round ?? null;
+  const s = tokenDoc.getFlag(MODULE_ID, "helm");
+  if ( !s || (s.round !== round) || (s.max !== max) ) return { max, left: max, bands: 0, facings: 0, round };
+  return s;
+}
+
+/**
+ * Steer a ship on the radar other than the center ship.
+ * @param {TokenDocument} tokenDoc
+ * @param {"forward"|"left"|"right"|"reset"} action
+ */
+export async function steerShip(tokenDoc, action) {
+  if ( !game.user.isGM ) return ui.notifications.warn("Steering runs on a GM client.");
+  const scene = tokenDoc?.parent;
+  const area = radarArea(scene);
+  if ( !area ) return;
+  return enqueue(async () => {
+    const st = helmState(tokenDoc);
+    if ( action === "reset" ) {
+      await tokenDoc.update({ [`flags.${MODULE_ID}.helm`]: { ...st, left: st.max, bands: 0, facings: 0 } }, { neonOdysseyResize: true });
+      return;
+    }
+    const forward = action === "forward";
+    const cost = forward ? nextBandCost(st.bands) : nextFacingCost(st.facings);
+    if ( st.left < cost ) {
+      ui.notifications.warn(`${tokenDoc.name}: ${forward ? `band ${st.bands + 1}` : `facing ${st.facings + 1}`} this turn costs ${cost} Speed; only ${st.left} left.`);
+      return;
+    }
+    const next = { ...st, left: st.left - cost, bands: st.bands + (forward ? 1 : 0), facings: st.facings + (forward ? 0 : 1) };
+    const src = tokenDoc._source;
+    const grid = scene.grid.size;
+    const rot = src.rotation ?? 0;
+    let update;
+    if ( forward ) {
+      const step = area.r / RADAR_BANDS;
+      const a = Math.toRadians(rot);
+      const cx = src.x + (src.width * grid) / 2, cy = src.y + (src.height * grid) / 2;
+      update = placeOnRadar(tokenDoc, cx + Math.sin(a) * step, cy - Math.cos(a) * step, area);
+    } else {
+      const deg = (action === "left") ? -FACING_DEGREES : FACING_DEGREES;
+      update = { _id: tokenDoc.id, rotation: ((rot + deg) % 360 + 360) % 360 };
+    }
+    update[`flags.${MODULE_ID}.helm`] = next;
+    await scene.updateEmbeddedDocuments("Token", [update], { neonOdysseyResize: true });
+  });
+}
+
+/** The floating helm panel for one radar ship (GM). */
+class RadarHelm extends foundry.applications.api.ApplicationV2 {
+  static DEFAULT_OPTIONS = {
+    id: "neon-odyssey-radar-helm",
+    classes: ["neon-odyssey", "radar-helm"],
+    window: { title: "Helm", resizable: false },
+    position: { width: 260, height: "auto" },
+    actions: {
+      left: (event, target) => RadarHelm.act("left"),
+      forward: (event, target) => RadarHelm.act("forward"),
+      right: (event, target) => RadarHelm.act("right"),
+      reset: (event, target) => RadarHelm.act("reset")
+    }
+  };
+
+  /** @type {RadarHelm|null} */
+  static current = null;
+
+  tokenDoc = null;
+
+  static act(action) {
+    const t = RadarHelm.current?.tokenDoc;
+    if ( t ) steerShip(t, action);
+  }
+
+  static show(tokenDoc) {
+    const app = (RadarHelm.current ??= new RadarHelm());
+    app.tokenDoc = tokenDoc;
+    app.render({ force: true });
+  }
+
+  static hide(tokenDoc) {
+    const app = RadarHelm.current;
+    if ( app && (!tokenDoc || (app.tokenDoc?.id === tokenDoc.id)) ) { app.tokenDoc = null; app.close(); }
+  }
+
+  get title() { return `Helm: ${this.tokenDoc?.name ?? ""}`; }
+
+  async _renderHTML() {
+    const t = this.tokenDoc;
+    if ( !t ) return "";
+    const st = helmState(t);
+    const band = nextBandCost(st.bands), turn = nextFacingCost(st.facings);
+    const dis = c => (st.left < c ? "disabled" : "");
+    const facing = Math.round(((t.rotation ?? 0) % 360 + 360) % 360 / FACING_DEGREES) || 12;
+    return `<div class="radar-helm-body" style="display:flex;flex-direction:column;gap:6px;padding:4px">
+      <div style="text-align:center"><strong>Speed ${st.left}</strong> of ${st.max} left
+        <br><small>Heading ${facing} o'clock · ${st.bands} band${st.bands === 1 ? "" : "s"}, ${st.facings} turn${st.facings === 1 ? "" : "s"} this turn</small></div>
+      <div style="display:flex;gap:4px">
+        <button type="button" data-action="left" ${dis(turn)} title="Turn one facing left (${turn} Speed)"><i class="fa-solid fa-rotate-left"></i> Left (${turn})</button>
+        <button type="button" data-action="forward" ${dis(band)} title="Move forward one range band (${band} Speed)"><i class="fa-solid fa-arrow-up"></i> Forward (${band})</button>
+        <button type="button" data-action="right" ${dis(turn)} title="Turn one facing right (${turn} Speed)"><i class="fa-solid fa-rotate-right"></i> Right (${turn})</button>
+      </div>
+      <button type="button" data-action="reset" title="Refill this ship's Speed"><i class="fa-solid fa-arrows-rotate"></i> New Turn</button>
+    </div>`;
+  }
+
+  _replaceHTML(result, content) { content.innerHTML = result; }
+}
+
+/** Is this token a ship on the radar, other than the center ship? */
+function isRadarContact(tokenDoc) {
+  const scene = tokenDoc?.parent;
+  if ( (tokenDoc?.actor?.type !== "vehicle") || !radarArea(scene) ) return false;
+  if ( tokenDoc.getFlag(MODULE_ID, "radarSelf") || (radarCenterShip(scene)?.id === tokenDoc.id) ) return false;
+  return !!tokenDoc.getFlag(MODULE_ID, "radarSize") || inFlaggedRegion(tokenDoc, "radar");
+}
+
+Hooks.on("controlToken", (token, controlled) => {
+  if ( !game.user.isGM ) return;
+  const doc = token.document;
+  if ( controlled && isRadarContact(doc) ) RadarHelm.show(doc);
+  else if ( !controlled ) RadarHelm.hide(doc);
+});
+Hooks.on("updateToken", tokenDoc => {
+  const app = RadarHelm.current;
+  if ( app?.rendered && (app.tokenDoc?.id === tokenDoc.id) ) app.render();
+});
+Hooks.on("deleteToken", tokenDoc => RadarHelm.hide(tokenDoc));
+Hooks.on("updateCombat", (combat, changes) => {
+  const app = RadarHelm.current;
+  if ( ("round" in changes) && app?.rendered ) app.render();
+});
+
+/* -------------------------------------------- */
 /*  Token hooks                                 */
 /* -------------------------------------------- */
 
@@ -681,6 +844,7 @@ Hooks.on("deleteToken", tokenDoc => {
     // A ship deleted while on the viewscreen gives back the permission the viewscreen lent.
     const saved = tokenDoc.getFlag(MODULE_ID, "viewSize");
     if ( saved ) enqueue(() => unshareShip(tokenDoc, saved));
+    if ( saved ) Hooks.callAll(`${MODULE_ID}.viewscreenLeave`, tokenDoc);
   }
   if ( !isActiveGM() || !sceneHasStations(tokenDoc.parent) ) return;
   // A deleted unlinked token takes its synthetic actor with it; only linked actors need cleanup.
@@ -820,23 +984,24 @@ export async function applyCost(scene, cost, { actor, label } = {}) {
 }
 
 /**
- * Player characters standing on a station on this scene: character actors with a player owner
- * whose token center is inside a station region or station tile. Each actor counts once.
- * @returns {Actor[]}
+ * Characters standing on a station on this scene: each token of a character-type actor whose
+ * center is inside a station region or station tile counts once. Player ownership is not
+ * required (a GM-owned test character counts), and NPC-type actors never count.
+ * @returns {Actor[]}   One entry per token (token.actor), in scene order.
  */
 export function crewOnStations(scene) {
-  const out = new Map();
+  const out = [];
   for ( const t of scene?.tokens ?? [] ) {
     const actor = t.actor;
-    if ( !actor || (actor.type !== "character") || !actor.hasPlayerOwner ) continue;
-    if ( stationsForToken(t).size ) out.set(actor.uuid, actor);
+    if ( !actor || (actor.type !== "character") ) continue;
+    if ( stationsForToken(t).size ) out.push(actor);
   }
-  return [...out.values()];
+  return out;
 }
 
 /**
- * The bridge's Reset button (GM only). Rules: starting Tempo equals the number of players, or 0
- * if the ship is surprised. Players are counted as player characters standing on this scene's
+ * The bridge's Reset button (GM only). Rules: starting Tempo equals the number of players plus the
+ * ship's Proficiency Bonus (from its Level, John 2026-10-13), or 0 if the ship is surprised. Players are counted as player characters standing on this scene's
  * stations. Strain carries over unless the GM ticks "Also clear Strain".
  * @param {Scene} scene   The scene the Reset button is on.
  */
@@ -849,14 +1014,17 @@ export async function resetStats(scene = canvas.scene) {
   if ( !tempoD ) return ui.notifications.warn(`No drawing tagged "Tempo" on ${scene?.name}.`);
   const crew = crewOnStations(scene);
   const names = crew.map(a => a.name).join(", ") || "none";
+  const ship = shipActor(scene);
+  const pb = ship ? Math.ceil(Math.max(1, Math.floor(Number(ship.flags?.[MODULE_ID]?.level) || 1)) / 4) + 1 : 0;
+  const start = crew.length + pb;
   const strainNow = readStat(scene, "strain");
   const result = await foundry.applications.api.DialogV2.wait({
     window: { title: "Reset Tempo" },
     content: `<p>Players on stations: <strong>${crew.length}</strong> (${names}).</p>
-      <p>Starting Tempo is ${crew.length}, or 0 if the ship is surprised.</p>
+      <p>Starting Tempo is ${start} (${crew.length} on stations${pb ? ` + ship Proficiency Bonus ${pb}` : ""}), or 0 if the ship is surprised.</p>
       ${strainNow === null ? "" : `<label><input type="checkbox" name="clearStrain"> Also clear Strain (now ${strainNow})</label>`}`,
     buttons: [
-      { action: "normal", label: `Normal (Tempo ${crew.length})`, default: true,
+      { action: "normal", label: `Normal (Tempo ${start})`, default: true,
         callback: (event, button) => ({ surprised: false, clearStrain: !!button.form.elements.clearStrain?.checked }) },
       { action: "surprised", label: "Surprised (Tempo 0)",
         callback: (event, button) => ({ surprised: true, clearStrain: !!button.form.elements.clearStrain?.checked }) },
@@ -865,14 +1033,14 @@ export async function resetStats(scene = canvas.scene) {
     rejectClose: false
   });
   if ( !result || (typeof result !== "object") ) return;
-  const tempo = result.surprised ? 0 : crew.length;
+  const tempo = result.surprised ? 0 : start;
   return enqueue(async () => {
     await tempoD.update({ text: String(tempo) });
     const strainD = statDrawing(scene, "strain");
     if ( result.clearStrain && strainD ) await strainD.update({ text: "0" });
     await ChatMessage.implementation.create({
       content: `<div class="no-crew-card"><h3>Tempo reset</h3>
-        <p>Tempo <strong>${tempo}</strong> (${result.surprised ? "surprised" : `${crew.length} on stations`})${
+        <p>Tempo <strong>${tempo}</strong> (${result.surprised ? "surprised" : `${crew.length} on stations${pb ? ` + ${pb} ship` : ""}`})${
           result.clearStrain && strainD ? " &nbsp;·&nbsp; Strain <strong>0</strong>" : ""}</p></div>`,
       speaker: { alias: shipActor(scene)?.name ?? "Bridge" },
       flags: { [MODULE_ID]: { crewResult: true } }
