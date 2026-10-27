@@ -1,0 +1,129 @@
+/* Neon Odyssey: local ship HUD on the sector map (sector-hud.mjs). Fixed size on screen.
+   It stands off from the ship far enough to leave Foundry's own token HUD (right-click icons) clear. */
+#no-ship-hud {
+  position: fixed; width: 0; height: 0; z-index: 30; pointer-events: none;
+  --nsh-r: 50px; font-family: "Signika", sans-serif; color: #fff;
+}
+#no-ship-hud .nsh-title {
+  position: absolute; left: 0; bottom: calc(var(--nsh-r) + 44px); transform: translateX(-50%);
+  white-space: nowrap; font-size: 13px; text-shadow: 0 0 3px #000, 0 0 6px #000; pointer-events: none;
+}
+#no-ship-hud .nsh-title small { color: #ffcc55; margin-left: 4px; }
+
+/* Left column: shield badge, Tempo, Strain, Speed */
+#no-ship-hud .nsh-left {
+  position: absolute; top: 0; right: calc(var(--nsh-r) + 64px); transform: translateY(-50%);
+  /* the Speed refill sits to the right of the Speed counter, inside this column */
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: auto;
+}
+#no-ship-hud .nsh-shield {
+  align-self: flex-end; width: 34px; height: 34px; display: grid; place-items: center; font-size: 26px;
+  color: #fff; text-shadow: 0 0 4px #000;
+}
+#no-ship-hud .nsh-stat { display: flex; align-items: center; gap: 4px; }
+#no-ship-hud .nsh-arrows { display: flex; flex-direction: column; gap: 2px; }
+#no-ship-hud .nsh-arrows a { display: block; width: 22px; text-align: center; font-size: 16px; cursor: pointer; text-shadow: 0 0 3px #000; }
+#no-ship-hud .nsh-arrows a:first-child { color: #33ff33; }
+#no-ship-hud .nsh-arrows a:last-child { color: #ff3333; }
+#no-ship-hud .nsh-arrows a:hover { filter: brightness(1.4); }
+#no-ship-hud .nsh-hex {
+  --c: #2fa8ff; position: relative; width: 118px; height: 58px; display: grid; place-items: center;
+  clip-path: polygon(14% 0, 86% 0, 100% 50%, 86% 100%, 14% 100%, 0 50%); background: var(--c);
+}
+#no-ship-hud .nsh-hex::before {
+  content: ""; position: absolute; inset: 3px; background: rgba(5, 10, 20, 0.92);
+  clip-path: polygon(14% 0, 86% 0, 100% 50%, 86% 100%, 14% 100%, 0 50%);
+}
+#no-ship-hud .nsh-hex > * { position: relative; }
+#no-ship-hud .nsh-val { font-size: 30px; line-height: 30px; font-weight: bold; color: var(--c); margin-top: -6px; }
+#no-ship-hud .nsh-max { position: absolute; right: 22px; top: 18px; font-size: 12px; color: var(--c); opacity: 0.8; }
+#no-ship-hud .nsh-hex label { position: absolute; bottom: 3px; font-size: 9px; letter-spacing: 3px; color: var(--c); }
+#no-ship-hud .nsh-strain .nsh-hex { --c: #ff4d4d; }
+#no-ship-hud .nsh-speed .nsh-hex { --c: #33dd66; }
+#no-ship-hud .nsh-stat { position: relative; }
+/* New Round (refill Speed): on the Speed gauge's top-right corner, out of the column's flow so the gauges stay aligned */
+#no-ship-hud .nsh-refill { position: absolute; right: -4px; top: -8px; z-index: 1; color: #33dd66; cursor: pointer; font-size: 14px; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+
+/* Under the ship: movement, then actions with the bridge / sheet buttons */
+#no-ship-hud .nsh-bottom {
+  position: absolute; left: 0; top: calc(var(--nsh-r) + 48px); transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: auto;
+}
+#no-ship-hud .nsh-moves { display: flex; gap: 8px; }
+#no-ship-hud .nsh-move {
+  position: relative; width: 40px; height: 36px; border: none; border-radius: 8px; font-size: 18px; color: #fff;
+  box-shadow: 0 0 6px #000; cursor: pointer; line-height: 1;
+}
+#no-ship-hud .nsh-move.nsh-mv-left { background: #d81e1e; }
+#no-ship-hud .nsh-move.nsh-mv-forward { background: #1f3fff; }
+#no-ship-hud .nsh-move.nsh-mv-right { background: #23d61f; }
+#no-ship-hud .nsh-move:hover:not([disabled]) { filter: brightness(1.25); }
+#no-ship-hud .nsh-move[disabled] { filter: grayscale(0.85) brightness(0.6); cursor: not-allowed; }
+#no-ship-hud .nsh-cost {
+  position: absolute; right: 1px; bottom: 1px; font-size: 10px; line-height: 12px; background: rgba(0,0,0,0.6); border-radius: 5px; padding: 0 3px;
+}
+#no-ship-hud .nsh-actions { display: grid; grid-template-columns: repeat(9, 48px); gap: 4px; justify-content: center; }
+#no-ship-hud .nsh-act {
+  position: relative; width: 48px; height: 48px; padding: 0; border: 2px solid #c9a23a; border-radius: 6px;
+  background-color: #10141c; background-size: cover; background-position: center; cursor: pointer; box-shadow: 0 0 4px #000;
+}
+#no-ship-hud .nsh-act:hover:not([disabled]) { border-color: #ffe08a; filter: brightness(1.2); }
+#no-ship-hud .nsh-act-name {
+  position: absolute; left: 0; right: 0; bottom: 0; font-size: 8px; line-height: 9px; background: rgba(0,0,0,0.65);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #fff;
+}
+#no-ship-hud .nsh-off { filter: grayscale(1) brightness(0.55); cursor: not-allowed; }
+#no-ship-hud .nsh-act.nsh-off::after, #no-ship-hud .nsh-move.nsh-off::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(45deg, transparent 44%, #ff1a1a 44%, #ff1a1a 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 44%, #ff1a1a 44%, #ff1a1a 56%, transparent 56%);
+}
+/* Right of the ship, opposite Tempo / Strain / Speed */
+#no-ship-hud .nsh-side {
+  position: absolute; top: 0; left: calc(var(--nsh-r) + 64px); transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 6px; pointer-events: auto;
+}
+#no-ship-hud .nsh-side-btn {
+  width: 40px; height: 40px; border: 2px solid #ff9a1a; border-radius: 8px; background: #2a1606; color: #ffb347;
+  font-size: 18px; cursor: pointer; box-shadow: 0 0 6px #ff7a00;
+}
+#no-ship-hud .nsh-side-btn:hover { background: #4a2608; }
+
+/* Mishap icon tooltip and GM menu (sector-hud.mjs) */
+#no-mishap-tip {
+  position: fixed; z-index: 1000; display: none; pointer-events: none; padding: 4px 8px; border-radius: 4px;
+  background: rgba(10, 10, 14, 0.92); border: 1px solid #ffa500; color: #fff; font-size: 13px; max-width: 280px;
+}
+#no-mishap-tip .no-off, #no-mishap-menu .no-off { color: #ff4040; font-weight: bold; }
+#no-mishap-menu {
+  position: fixed; z-index: 1000; min-width: 190px; background: rgba(10, 10, 14, 0.96); border: 1px solid #ffa500;
+  border-radius: 4px; color: #fff; font-size: 13px; box-shadow: 0 0 8px #000;
+}
+#no-mishap-menu .nmm-head { padding: 4px 8px; color: #ffcc55; border-bottom: 1px solid #553300; }
+#no-mishap-menu a { display: block; padding: 4px 8px; cursor: pointer; }
+#no-mishap-menu a:hover { background: #3a2408; }
+
+/* Bridge: Go to Sector Map, and the GM's sector map picker */
+#no-sector-link { position: fixed; z-index: 1; display: flex; gap: 4px; }
+#no-sector-link button {
+  width: auto; padding: 4px 10px; border: 2px solid #ff9a1a; border-radius: 6px;
+  background: #2a1606; color: #ffb347; font-size: 14px; box-shadow: 0 0 6px #ff7a00; cursor: pointer; line-height: 1.2;
+}
+#no-sector-link button:hover { background: #4a2608; }
+
+/* Enemy ship action cards: the crew check */
+.no-crew-check { margin-top: 4px; font-size: 12px; }
+
+/* Weapon picker (ship-fire.mjs) */
+.nsf-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; max-height: 320px; overflow-y: auto; }
+.nsf-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
+.nsf-row:hover { background: rgba(255, 165, 0, 0.15); }
+.nsf-row img { border: none; flex: none; }
+.nsf-row em { display: block; font-size: 0.85em; opacity: 0.8; }
+
+/* Action economy: a used Action (or a Reaction off-turn) greys the button out, no red X. */
+#no-ship-hud .nsh-act.nsh-used { filter: grayscale(1) brightness(0.45); opacity: 0.6; cursor: not-allowed; }
+
+/* Rally Command die armed for the next roll. */
+.nsh-side-btn.nsh-armed { box-shadow: 0 0 8px 2px #ffcc33; border-color: #ffcc33; color: #ffcc33; }

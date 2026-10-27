@@ -10,6 +10,7 @@
 // otherwise the ship's lost hit points (max HP minus current HP).
 
 import { readStat, shipActor, tagsOf } from "./crew-stations.mjs";
+import { getState, hasState, addMishap } from "./ship-state.mjs";
 
 const MODULE_ID = "fvtt-neon-odyssey";
 const PACK_ID = `${MODULE_ID}.actors`;
@@ -47,6 +48,8 @@ export function tierForPasses(passes) {
 
 /** The ship's current Strain (see header), or null when it can't be determined. */
 export function shipStrain(actor) {
+  // Strain is an attribute of the ship (John, 2026-10-25).
+  if ( hasState(actor) ) return getState(actor).strain;
   const scene = canvas?.scene;
   if ( scene && shipActor(scene)?.id === actor.id ) {
     const s = readStat(scene, "strain");
@@ -76,7 +79,7 @@ export async function possibleMishaps(actor, tier) {
     const entry = index.get(key);
     const uuid = entry?.tiers[tier] ?? "";
     const doc = uuid ? fromUuidSync(uuid) : null;
-    out.push({ uuid, name: doc?.name ?? key, manual: false, missing: !uuid });
+    out.push({ uuid, key, name: doc?.name ?? key, manual: false, missing: !uuid });
   }
   const seen = new Set(out.map(m => m.uuid).filter(Boolean));
   for ( const uuid of flags.mishaps ?? [] ) {
@@ -101,7 +104,7 @@ export async function rollMishap(actor, passes) {
  * Chat HTML for the Mishaps gained as Strain rose from `before` to `after`: one rolled mishap
  * per threshold passed, each at the tier for that pass, as a link you can drag onto the canvas.
  */
-export async function mishapAlert(actor, before, after) {
+export async function mishapAlert(actor, before, after, { record = false } = {}) {
   const mt = Number(actor?.system.attributes?.hp?.mt) || 0;
   if ( !actor || mt <= 0 || after <= before ) return "";
   const from = Math.floor(before / mt), to = Math.floor(after / mt);
@@ -109,7 +112,13 @@ export async function mishapAlert(actor, before, after) {
   const lines = [];
   for ( let p = from + 1; p <= to; p++ ) {
     const m = await rollMishap(actor, p);
-    const what = m ? `@UUID[${m.uuid}]{${m.name}}` : "no Possible Mishaps on this ship; roll one yourself";
+    let where = "";
+    // The GM records the Mishap on the system whose component can suffer it (its warning light).
+    if ( m && record && game.users.activeGM?.isSelf ) {
+      const entry = await addMishap(actor, { uuid: m.uuid, name: m.name, key: m.key, tier: MISHAP_TIERS[tierForPasses(p)] });
+      if ( entry ) where = ` on ${entry.system === "command" ? "Command & Control" : entry.system[0].toUpperCase() + entry.system.slice(1)}`;
+    }
+    const what = m ? `@UUID[${m.uuid}]{${m.name}}${where}` : "no Possible Mishaps on this ship; roll one yourself";
     lines.push(`Strain passed ${p * mt}: ${what}`);
   }
   return `<p class="no-crew-alert"><strong>MISHAP${lines.length > 1 ? ` ×${lines.length}` : ""}!</strong>

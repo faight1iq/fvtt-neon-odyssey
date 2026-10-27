@@ -1,8 +1,23 @@
-2026/10/11-13:53:57.720 19dac Recovering log #330
-2026/10/11-13:53:57.838 19dac Delete type=0 #330
-2026/10/11-13:53:57.839 19dac Delete type=3 #329
-2026/10/11-23:51:20.325 1db38 Level-0 table #334: started
-2026/10/11-23:51:20.325 1db38 Level-0 table #334: 0 bytes OK
-2026/10/11-23:51:20.371 1db38 Delete type=0 #332
-2026/10/11-23:51:20.375 1db38 Manual compaction at level-0 from '!folders!017d2b6a97e84766' @ 72057594037927935 : 1 .. '!items!ff2989a9a9a944ce' @ 0 : 0; will stop at (end)
-2026/10/11-23:51:20.485 1db38 Manual compaction at level-1 from '!folders!017d2b6a97e84766' @ 72057594037927935 : 1 .. '!items!ff2989a9a9a944ce' @ 0 : 0; will stop at (end)
+2026/10/25-11:27:49.384 4401c Recovering log #336
+2026/10/25-11:27:49.384 4401c Level-0 table #338: started
+2026/10/25-11:27:49.431 4401c Level-0 table #338: 5095 bytes OK
+2026/10/25-11:27:49.518 4401c Delete type=0 #336
+2026/10/25-11:27:49.519 4401c Delete type=3 #335
+2026/10/25-11:38:19.553 43fa4 Level-0 table #341: started
+2026/10/25-11:38:19.557 43fa4 Level-0 table #341: 0 bytes OK
+2026/10/25-11:38:19.572 43fa4 Delete type=0 #339
+2026/10/25-11:38:19.590 43fa4 Manual compaction at level-0 from '!folders!017d2b6a97e84766' @ 72057594037927935 : 1 .. '!items!ff2989a9a9a944ce' @ 0 : 0; will stop at '!items!NOcrewRoleGun000' @ 928 : 1
+2026/10/25-11:38:19.590 43fa4 Compacting 1@0 + 0@1 files
+2026/10/25-11:38:19.639 43fa4 Generated table #342@0: 1 keys, 2624 bytes
+2026/10/25-11:38:19.639 43fa4 Compacted 1@0 + 0@1 files => 2624 bytes
+2026/10/25-11:38:19.658 43fa4 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/10/25-11:38:19.658 43fa4 Delete type=2 #338
+2026/10/25-11:38:19.660 43fa4 Manual compaction at level-0 from '!items!NOcrewRoleGun000' @ 928 : 1 .. '!items!ff2989a9a9a944ce' @ 0 : 0; will stop at (end)
+2026/10/25-11:38:19.660 43fa4 Manual compaction at level-1 from '!folders!017d2b6a97e84766' @ 72057594037927935 : 1 .. '!items!ff2989a9a9a944ce' @ 0 : 0; will stop at '!items!NOcrewRoleGun000' @ 929 : 1
+2026/10/25-11:38:19.660 43fa4 Compacting 1@1 + 1@2 files
+2026/10/25-11:38:19.810 43fa4 Generated table #343@1: 543 keys, 489253 bytes
+2026/10/25-11:38:19.810 43fa4 Compacted 1@1 + 1@2 files => 489253 bytes
+2026/10/25-11:38:19.863 43fa4 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/10/25-11:38:19.863 43fa4 Delete type=2 #312
+2026/10/25-11:38:19.863 43fa4 Delete type=2 #342
+2026/10/25-11:38:19.953 43fa4 Manual compaction at level-1 from '!items!NOcrewRoleGun000' @ 929 : 1 .. '!items!ff2989a9a9a944ce' @ 0 : 0; will stop at (end)

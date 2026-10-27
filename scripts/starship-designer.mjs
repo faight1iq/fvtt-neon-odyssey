@@ -11,6 +11,10 @@ import { SLOT_DEFS, FACINGS, GUNNER_FACINGS, LOCATIONS, LOCATION_KEYS, SYSTEM_RO
 import "./crew-stations.mjs";
 import "./ship-hud.mjs";
 import "./sector-map.mjs";
+import { crewBonus, crewQualitySet, usesOwnStats, fireContext, STATION_SKILLS, impairedReason, systemOfItem } from "./ship-state.mjs";
+import "./sector-hud.mjs";
+import "./radar-link.mjs";
+import "./ship-fire.mjs";
 
 export const MODULE_ID = "fvtt-neon-odyssey";
 export { SLOT_DEFS, FACINGS, GUNNER_FACINGS, LOCATIONS, needsStation, needsSeat, locationLabel };
@@ -354,6 +358,8 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
 
 /** The character firing: the user's assigned character, else a controlled character token (for the GM). */
 function getGunner() {
+  // Fired from the HUD: ship-fire names the character at the Gunnery Station (null = the ship's own crew).
+  if ( fireContext.gunner !== undefined ) return fireContext.gunner;
   if ( game.user.character ) return game.user.character;
   return canvas?.tokens?.controlled.find(t => t.actor?.type === "character")?.actor ?? null;
 }
@@ -365,20 +371,31 @@ function isShipWeapon(activity) {
   return actor.getFlag("core", "sheetClass") === `${MODULE_ID}.StarshipSheet` || !!item.flags[MODULE_ID];
 }
 
-// Attack roll: add the gunner's DEX (STR for melee) modifier and proficiency bonus.
+// Attack roll (John, 2026-10-25: the Gunnery Station is a tool): the gunner's DEX (STR for melee) + PB + the
+// station bonus (the ship's PB). A ship's own crew, or one with a Crew item, uses crew quality for DEX + PB.
 Hooks.on("dnd5e.postBuildAttackRollConfig", (process, config) => {
   const activity = process.subject;
   if ( !isShipWeapon(activity) ) return;
-  if ( config.parts?.includes("@gunner.mod") ) return;
-  const gunner = getGunner();
-  if ( !gunner ) return;
+  if ( config.parts?.includes("@stationBonus") ) return;
+  const station = { stationBonus: shipProf(activity.actor) };
+  const g0 = getGunner(); const gunner = usesOwnStats(g0, activity.actor) ? g0 : null;
+  if ( !gunner ) {
+    config.parts = [...(config.parts ?? []), "@crewGunner", "@stationBonus"];
+    config.data = { ...(config.data ?? {}), crewGunner: crewBonus(activity.actor, "gunner"), ...station };
+    return;
+  }
   const ability = activity.attack?.type?.value === "melee" ? "str" : "dex";
-  config.parts = [...(config.parts ?? []), "@gunner.mod", "@gunner.prof"];
+  config.parts = [...(config.parts ?? []), "@gunner.mod", "@gunner.prof", "@stationBonus"];
   config.data = {
-    ...(config.data ?? {}),
+    ...(config.data ?? {}), ...station,
     gunner: { mod: gunner.system.abilities[ability]?.mod ?? 0, prof: gunner.system.attributes.prof ?? 0 }
   };
 });
+
+/** Whether a character at the Gunnery Station has Advantage from a paired skill (Perception, Survival). */
+export function gunnerAdvantage(gunner) {
+  return !!gunner && (STATION_SKILLS.gunner ?? []).some(k => (Number(gunner.system?.skills?.[k]?.value) || 0) >= 1);
+}
 
 // Damage: add the ship's Proficiency Bonus once per hit (attacks) or per volley (racks, saves).
 Hooks.on("dnd5e.preRollDamageV2", (config) => {
@@ -394,9 +411,9 @@ Hooks.on("dnd5e.preRollDamageV2", (config) => {
 Hooks.on("dnd5e.preRollAttackV2", (config, dialog, message) => {
   const activity = config.subject;
   if ( !isShipWeapon(activity) ) return;
-  const gunner = getGunner();
+  const g0 = getGunner(); const gunner = usesOwnStats(g0, activity.actor) ? g0 : null;
   if ( !gunner ) {
-    ui.notifications.warn("No character assigned to your account: this attack uses no gunner bonus.");
+    if ( message?.data ) message.data.flavor = `${message.data.flavor ?? activity.item.name} (Crew Gunner +${crewBonus(activity.actor, "gunner")}, ship +${shipProf(activity.actor)})`;
     return;
   }
   if ( message?.data ) message.data.flavor = `${message.data.flavor ?? activity.item.name} (Gunner: ${gunner.name})`;
@@ -445,6 +462,17 @@ export async function spendAmmo(actor, itemId) {
 export async function rearm(actor) {
   if ( actor?.isOwner ) await actor.update({ [`flags.${MODULE_ID}.-=ammoUsed`]: null });
 }
+
+// A weapon on an Impaired system, or any weapon on an Impaired ship, attacks with Disadvantage (John, 2026-10-26).
+Hooks.on("dnd5e.preRollAttackV2", (config, dialog, message) => {
+  const activity = config.subject;
+  if ( !isShipWeapon(activity) ) return;
+  const g0 = getGunner();
+  const why = impairedReason(activity.actor, [systemOfItem(activity.item)], (g0 && g0.type !== "vehicle") ? g0 : null);
+  if ( !why ) return;
+  config.disadvantage = true;
+  if ( message?.data ) message.data.flavor = `${message.data.flavor ?? activity.item.name} (Disadvantage: ${why})`;
+});
 
 // Ship weapon attacks spend ammo before rolling; out of ammo cancels the attack.
 Hooks.on("dnd5e.preRollAttackV2", (config, dialog, message) => {

@@ -11,12 +11,17 @@
 // client reacts to them in createChatMessage.
 
 import { mishapAlert } from "./mishap-links.mjs";
+import { getState, setState, hasState, refillSpeed, shipSpeed, request, strainAlerts, shipContext, shipForCrew,
+  nextFacingCost, nextForwardCost, FACING_DEGREES, baseActor } from "./ship-state.mjs";
+export { shipSpeed };
 const MODULE_ID = "fvtt-neon-odyssey";
 
 /** Gain Tempo: DC = current Tempo, but never below this. */
 const GAIN_TEMPO_MIN_DC = 8;
 /** Gain Tempo: a success adds the skill's proficiency, but never less than this. */
 const GAIN_TEMPO_MIN_GAIN = 1;
+/** Gain Tempo: Tempo added on a success (John, 2026-10-25: a fixed number, not PB). */
+const GAIN_TEMPO_AMOUNT = 2;
 const PACK_ID = `${MODULE_ID}.class-features`;
 const FEATURE_TYPE = "crewRole";
 
@@ -27,7 +32,9 @@ export const ROLE_ITEMS = {
   navigator: "NOcrewRoleNav000",
   helmsman:  "NOcrewRoleHelm00",
   gunner:    "NOcrewRoleGun000",
-  engineer:  "NOcrewRoleEng000"
+  engineer:  "NOcrewRoleEng000",
+  medic:     "NOcrewRoleMed000",
+  cook:      "NOcrewRoleCook00"
 };
 
 /**
@@ -45,7 +52,7 @@ export const COMBINED_STATIONS = {
  * Seats with a crew card but no Crew Role features of their own (they get Any Station):
  * Cook and Medic.
  */
-const SEAT_ROLES = ["cook", "medic"];
+const SEAT_ROLES = [];   // Cook and Medic got their own Crew Role features (John, 2026-10-26).
 
 /**
  * Role keys a station flag grants: itself, or the roles of a combined station.
@@ -63,7 +70,7 @@ const isActiveGM = () => game.users.activeGM?.isSelf ?? false;
 
 Hooks.once("init", () => {
   CONFIG.DND5E.featureTypes[FEATURE_TYPE] = { label: "Crew Role" };
-  game.modules.get(MODULE_ID).crew = { reconcileScene, reconcileActor, readStat, applyCost, adjustStat, resetStats, crewOnStations, syncSpeed, radarCenterShip, shipSpeed, adjustSpeed, steerForward, steerTurn, steerShip, ROLE_ITEMS, COMBINED_STATIONS };
+  game.modules.get(MODULE_ID).crew = { reconcileScene, reconcileActor, readStat, applyCost, adjustStat, resetStats, crewOnStations, syncSpeed, syncShipDrawings, radarCenterShip, shipActor, shipSpeed, adjustSpeed, steerForward, steerTurn, steerShip, ROLE_ITEMS, COMBINED_STATIONS };
 });
 
 /* -------------------------------------------- */
@@ -87,8 +94,35 @@ function statDrawing(scene, tag) {
   return scene?.drawings.find(d => tagsOf(d).includes(tag));
 }
 
-/** Current numeric value of the "Tempo" or "Strain" drawing, or null if there isn't one. */
+/**
+ * Current Tempo, Strain or Speed for a bridge scene. They are attributes of the ship (John,
+ * 2026-10-25): Tempo and Strain of the ship on the display, Speed of the friendly ship at the radar's
+ * center. Without a ship, the "Tempo"/"Strain"/"Speed" drawing's number (null if there isn't one).
+ */
 export function readStat(scene, tag) {
+  const t = String(tag).toLowerCase();
+  const ship = statShip(scene, t);
+  if ( ship && ((t === "speed") || hasState(ship) || !statDrawing(scene, tag)) ) return getState(ship)[t];
+  return readDrawing(scene, tag);
+}
+
+/** The ship whose Tempo/Strain (display ship) or Speed (radar center ship) a bridge scene shows. */
+export function statShip(scene, tag) {
+  if ( String(tag).toLowerCase() === "speed" ) return helmShip(scene);
+  return shipActor(scene);
+}
+
+/** Set Tempo or Strain on the scene's ship (or its drawing when there is no ship). */
+async function writeStat(scene, tag, value) {
+  const t = String(tag).toLowerCase();
+  const ship = statShip(scene, t);
+  if ( ship ) return setState(ship, { [t]: value });
+  const d = statDrawing(scene, tag);
+  if ( d ) await d.update({ text: String(value) });
+}
+
+/** The number in a drawing tagged Tempo/Strain/Speed, or null if there isn't one. */
+function readDrawing(scene, tag) {
   const d = statDrawing(scene, tag);
   if ( !d ) return null;
   const n = parseInt(String(d.text ?? "").replace(/[^\d-]/g, ""), 10);
@@ -107,6 +141,10 @@ export function shipActor(scene) {
   const onView = vehicles.filter(t => inFlaggedRegion(t, "viewscreen"));
   // Prefer a ship the module placed on the viewscreen, then any other ship standing on it.
   const token = onView.find(t => t.getFlag(MODULE_ID, "viewSize")) ?? onView[0];
+  // A crew ship (its prototype token is linked) keeps its Tempo, Strain and Speed on its own actor, even
+  // when the token on the display is an unlinked copy, so the bridge and the sector map always agree.
+  const base = token && !token.actorLink ? game.actors.get(token.actorId) : null;
+  if ( base?.prototypeToken?.actorLink ) return base;
   return token?.actor ?? null;
 }
 
@@ -221,6 +259,8 @@ export async function reconcileActor(actor, scene, moved = null) {
     await syncTokenSize(t, [...here].some(k => k !== "any"));
   }
   if ( wanted.size ) wanted.add("any");
+  // Save the assignment on the ship (John, 2026-10-25), so the sector map knows who crews what.
+  await recordCrew(scene, actor, wanted);
 
   const owned = actor.items.filter(i => i.getFlag(MODULE_ID, "crewRole"));
   const toDelete = owned.filter(i => !wanted.has(i.getFlag(MODULE_ID, "crewRole"))).map(i => i.id);
@@ -239,6 +279,19 @@ export async function reconcileActor(actor, scene, moved = null) {
     });
     if ( data.length ) await actor.createEmbeddedDocuments("Item", data);
   }
+}
+
+/** Keep the display ship's crew record ({ actorId: [roles] }) in step with who stands on its stations. */
+async function recordCrew(scene, actor, roles) {
+  // Always on the ship's own actor, so its linked token on the sector map sees the crew even when the
+  // token on the bridge display is an unlinked copy.
+  const ship = baseActor(shipActor(scene));
+  if ( !ship || actor.isToken ) return;
+  const now = ship.getFlag(MODULE_ID, "crew")?.[actor.id] ?? [];
+  const next = [...roles].sort();
+  if ( (now.length === next.length) && now.every((r, i) => [...now].sort()[i] === next[i]) ) return;
+  if ( next.length ) await ship.update({ [`flags.${MODULE_ID}.crew.${actor.id}`]: next });
+  else if ( now.length ) await ship.update({ [`flags.${MODULE_ID}.crew.-=${actor.id}`]: null });
 }
 
 /** Reconcile every character and NPC token on a scene. */
@@ -280,7 +333,7 @@ const RADAR_COLORS = {
  * Token Magic glow for a ship on the radar (John's filter settings), colored by disposition:
  * hostile red, neutral white, friendly blue. Secret tokens glow white so they don't give themselves away.
  */
-function radarGlow(tokenDoc) {
+export function radarGlow(tokenDoc) {
   const D = CONST.TOKEN_DISPOSITIONS;
   const key = tokenDoc.disposition === D.HOSTILE ? "hostile"
     : tokenDoc.disposition === D.FRIENDLY ? "friendly" : "neutral";
@@ -397,6 +450,17 @@ async function enterViewscreen(tokenDoc) {
     [`flags.${MODULE_ID}.viewSize`]: { width: src.width, height: src.height, displayName: src.displayName,
       ownershipDefault: await shareShip(tokenDoc.actor) }
   }, { animate: false, neonOdysseyResize: true });
+  // This is the ship's bridge: the sector-map HUD's "Go to Bridge" button opens it.
+  const base = baseActor(tokenDoc.actor);
+  // A crew ship's display token must be linked, or the bridge and the sector map keep separate Tempo,
+  // Strain and Speed.
+  if ( !tokenDoc.actorLink && base?.prototypeToken?.actorLink ) {
+    ui.notifications.warn(`${base.name} on the display is an unlinked token, so the bridge and the sector map won't share Tempo, Strain and Speed. Delete it and drop ${base.name} on the display again from the Actors sidebar.`, { permanent: true });
+  }
+  if ( base && (base.getFlag(MODULE_ID, "bridgeSceneId") !== tokenDoc.parent.id) ) {
+    await base.setFlag(MODULE_ID, "bridgeSceneId", tokenDoc.parent.id);
+  }
+  await syncShipDrawings(tokenDoc.actor);
 }
 
 /**
@@ -492,7 +556,7 @@ async function syncShipDisplay(tokenDoc) {
 const RADAR_CENTER_FRACTION = 0.2;
 
 /** Center and radius of the scene's radar (a flagged tile, or a flagged ellipse region). */
-function radarArea(scene) {
+export function radarArea(scene) {
   const tile = scene?.tiles.find(t => t.getFlag(MODULE_ID, "radar"));
   if ( tile ) {
     const scale = Number(tile.getFlag(MODULE_ID, "areaScale")) || 1;
@@ -515,6 +579,7 @@ export function radarCenterShip(scene) {
   let best = null, bestD = area.r * RADAR_CENTER_FRACTION;
   for ( const t of scene.tokens ) {
     if ( (t.actor?.type !== "vehicle") || (t.disposition !== CONST.TOKEN_DISPOSITIONS.FRIENDLY) ) continue;
+    if ( t.getFlag(MODULE_ID, "radarMirror") ) continue;   // a sector-map contact, never the crew's ship
     const src = t._source;
     const d = Math.hypot(src.x + (src.width * grid) / 2 - area.x, src.y + (src.height * grid) / 2 - area.y);
     if ( d <= bestD ) { best = t; bestD = d; }
@@ -522,30 +587,45 @@ export function radarCenterShip(scene) {
   return best;
 }
 
-/** A ship's Speed per round: its designed Speed (or its movement value), minimum 1. */
-export function shipSpeed(actor) {
-  const f = actor?.flags?.[MODULE_ID] ?? {};
-  const key = f.movementKey ?? "fly";
-  const raw = Number.isFinite(Number(f.speed)) ? Number(f.speed) : Number(actor?.system?.attributes?.movement?.[key]);
-  return Math.max(1, Number.isFinite(raw) ? Math.floor(raw) : 1);
-}
 
 /**
- * Set the scene's "Speed" drawing to the center ship's Speed. Without `force` it only does so when
- * the center ship has changed (so Speed already spent this round is kept). With no ship at the
+ * Show the radar center ship's Speed left on the scene's "Speed" drawing. With `force` the ship's
+ * Speed is first refilled (a new round of maneuvering: Maneuver, the reset button). With no ship at the
  * center the display shows a dash.
  */
 export async function syncSpeed(scene = canvas.scene, { force = false } = {}) {
   const drawing = statDrawing(scene, "speed");
+  const ship = radarCenterShip(scene) ? helmShip(scene) : null;
+  if ( force && ship ) await refillSpeed(ship);
   if ( !drawing ) return;
-  const ship = radarCenterShip(scene);
-  const key = ship?.actor?.uuid ?? null;
-  const stored = drawing.getFlag(MODULE_ID, "speedShip") ?? null;
-  if ( !force && (key === stored) ) return;
-  const text = ship ? String(shipSpeed(ship.actor)) : "\u2014";
-  // Setting Speed starts a new pilot turn: the bands moved and facings turned go back to 0.
-  await drawing.update({ text, [`flags.${MODULE_ID}.speedShip`]: key,
-    [`flags.${MODULE_ID}.steerBands`]: 0, [`flags.${MODULE_ID}.steerFacings`]: 0 });
+  const text = ship ? String(getState(ship).speed) : "\u2014";
+  const key = ship?.uuid ?? null;
+  if ( (drawing.text === text) && (drawing.getFlag(MODULE_ID, "speedShip") === key) ) return;
+  await drawing.update({ text, [`flags.${MODULE_ID}.speedShip`]: key });
+}
+
+/**
+ * Mirror a ship's Tempo, Strain and Speed onto the drawings of every bridge scene showing it (GM).
+ * A ship shown for the first time takes its Tempo and Strain from the drawings (old bridges).
+ */
+export async function syncShipDrawings(actor) {
+  const base = baseActor(actor);
+  for ( const scene of game.scenes ) {
+    const onDisplay = shipActor(scene);
+    if ( onDisplay && (baseActor(onDisplay) === base) ) {
+      if ( !hasState(onDisplay) ) {
+        await setState(onDisplay, { tempo: readDrawing(scene, "tempo") ?? 0, strain: readDrawing(scene, "strain") ?? 0 });
+        continue;   // the update comes back here through updateActor
+      }
+      const st = getState(onDisplay);
+      for ( const tag of ["tempo", "strain"] ) {
+        const d = statDrawing(scene, tag);
+        if ( d && (readDrawing(scene, tag) !== st[tag]) ) await d.update({ text: String(st[tag]) });
+      }
+    }
+    const center = radarCenterShip(scene) ? helmShip(scene) : null;
+    if ( center && (baseActor(center) === base) ) await syncSpeed(scene);
+  }
 }
 
 /* -------------------------------------------- */
@@ -554,40 +634,25 @@ export async function syncSpeed(scene = canvas.scene, { force = false } = {}) {
 
 /** Range bands on the radar, from the center to the rim. */
 const RADAR_BANDS = 5;
-/** Degrees in one clock facing. */
-const FACING_DEGREES = 30;
 
-/**
- * Speed cost of the next step this pilot turn. Range bands double: 1, 2, 4, 8, 16.
- * Clock facings rise by 1: 1, 2, 3, 4, 5, 6.
- */
-const nextBandCost = bandsSoFar => 2 ** bandsSoFar;
-const nextFacingCost = facingsSoFar => facingsSoFar + 1;
-
-/** GM check plus the scene's Speed drawing; warns and returns null if either is missing. */
-function steeringDrawing(scene) {
-  if ( !game.user.isGM ) {
-    ui.notifications.warn("Steering runs on a GM client.");
-    return null;
-  }
-  const d = statDrawing(scene, "speed");
-  if ( !d ) ui.notifications.warn(`No drawing tagged "Speed" on ${scene?.name}.`);
-  return d ?? null;
+/** The ship the bridge's helm buttons steer: the friendly ship at the radar center, else the display ship. */
+function helmShip(scene) {
+  const center = radarCenterShip(scene);
+  // The radar's own copy of the display ship (placed by the HUD builder) stands for the display ship.
+  if ( center?.getFlag(MODULE_ID, "radarSelf") ) return shipActor(scene) ?? center.actor;
+  return center?.actor ?? shipActor(scene);
 }
 
-/** Raise or lower the Speed display by hand (the radar's Speed buttons). Never below 0. */
+/** Raise or lower the helm ship's Speed by hand (the radar's Speed buttons). Never below 0. */
 export async function adjustSpeed(delta, scene = canvas.scene) {
-  const d = steeringDrawing(scene);
-  if ( !d ) return;
-  return enqueue(async () => {
-    const now = readStat(scene, "speed") ?? 0;
-    await d.update({ text: String(Math.max(0, now + delta)) });
-  });
+  const ship = helmShip(scene);
+  if ( !ship ) return ui.notifications.warn(`No ship at the radar's center on ${scene?.name}.`);
+  return request({ action: "adjust", uuid: ship.uuid, stat: "speed", delta });
 }
 
 /** Ships shown on the radar, other than the center ship. */
 function radarShips(scene, center) {
-  return scene.tokens.filter(t => (t.actor?.type === "vehicle") && (t.id !== center?.id)
+  return scene.tokens.filter(t => (t.actor?.type === "vehicle") && (t.id !== center?.id) && !t.getFlag(MODULE_ID, "radarMirror")
     && (t.getFlag(MODULE_ID, "radarSize") || inFlaggedRegion(t, "radar")));
 }
 
@@ -603,72 +668,63 @@ function placeOnRadar(tokenDoc, x, y, area, extra = {}) {
   return { _id: tokenDoc.id, x: Math.round(x - half), y: Math.round(y - (src.height * grid) / 2), ...extra };
 }
 
-/** Spend Speed for one step, or warn and return false if there isn't enough. */
-async function spendSpeed(d, scene, cost, what) {
-  const speed = readStat(scene, "speed") ?? 0;
-  if ( speed < cost ) {
-    ui.notifications.warn(`${what} costs ${cost} Speed; only ${speed} left.`);
-    return false;
-  }
-  await d.update({ text: String(speed - cost) });
-  return true;
-}
-
-/**
- * The pilot moves the ship forward one range band. The center ship stays put (it faces the top
- * of the radar), so every other ship on the radar moves one band toward the bottom.
- */
+/** The bridge's Forward button: the ship moves one hex (on its sector map too) and the radar follows. */
 export async function steerForward(scene = canvas.scene) {
-  const d = steeringDrawing(scene);
-  const area = radarArea(scene);
-  if ( !d || !area ) return;
-  return enqueue(async () => {
-    const bands = Number(d.getFlag(MODULE_ID, "steerBands")) || 0;
-    const cost = nextBandCost(bands);
-    if ( !(await spendSpeed(d, scene, cost, `Band ${bands + 1} this turn`)) ) return;
-    await d.setFlag(MODULE_ID, "steerBands", bands + 1);
-    const step = area.r / RADAR_BANDS;
-    const grid = scene.grid.size;
-    const updates = radarShips(scene, radarCenterShip(scene)).map(t => {
-      const src = t._source;
-      return placeOnRadar(t, src.x + (src.width * grid) / 2, src.y + (src.height * grid) / 2 + step, area);
-    });
-    if ( updates.length ) await scene.updateEmbeddedDocuments("Token", updates, { neonOdysseyResize: true });
-  });
+  const ship = helmShip(scene);
+  if ( !ship ) return ui.notifications.warn(`No ship at the radar's center on ${scene?.name}.`);
+  return request({ action: "steer", uuid: ship.uuid, move: "forward" });
+}
+
+/** The bridge's turn buttons: "ccw" turns the ship left one facing (60°), "cw" right. */
+export async function steerTurn(direction, scene = canvas.scene) {
+  const ship = helmShip(scene);
+  if ( !ship ) return ui.notifications.warn(`No ship at the radar's center on ${scene?.name}.`);
+  return request({ action: "steer", uuid: ship.uuid, move: direction === "cw" ? "right" : "left" });
 }
 
 /**
- * The pilot turns the ship one clock facing. "ccw" (counterclockwise) swings every other ship on
- * the radar 30° clockwise around the center, and turns each of them 30° clockwise too; "cw" is the
- * mirror image.
+ * The radar follows the crew's ship (GM): it stays at the center facing the top, so moving forward
+ * moves every other radar ship one band toward the bottom, and turning left swings them 60°
+ * clockwise around the center (turning right, the mirror image).
  */
-export async function steerTurn(direction, scene = canvas.scene) {
-  const d = steeringDrawing(scene);
-  const area = radarArea(scene);
-  if ( !d || !area ) return;
-  return enqueue(async () => {
-    const facings = Number(d.getFlag(MODULE_ID, "steerFacings")) || 0;
-    const cost = nextFacingCost(facings);
-    if ( !(await spendSpeed(d, scene, cost, `Facing ${facings + 1} this turn`)) ) return;
-    await d.setFlag(MODULE_ID, "steerFacings", facings + 1);
-    const deg = (direction === "cw") ? -FACING_DEGREES : FACING_DEGREES;
-    const a = Math.toRadians(deg), cos = Math.cos(a), sin = Math.sin(a);
+async function radarFollow(actor, move) {
+  const base = baseActor(actor);
+  // A ship flying on a sector map gets its radar contacts from that map (radar-link.mjs).
+  const { sectorScene } = await import("./ship-state.mjs");
+  if ( sectorScene(base) ) return;
+  for ( const scene of game.scenes ) {
+    const center = radarCenterShip(scene);
+    if ( !center || (baseActor(helmShip(scene)) !== base) ) continue;
+    const area = radarArea(scene);
+    if ( !area ) continue;
     const grid = scene.grid.size;
-    const updates = radarShips(scene, radarCenterShip(scene)).map(t => {
-      const src = t._source;
-      const dx = src.x + (src.width * grid) / 2 - area.x, dy = src.y + (src.height * grid) / 2 - area.y;
-      return placeOnRadar(t, area.x + dx * cos - dy * sin, area.y + dx * sin + dy * cos, area,
-        { rotation: (((src.rotation ?? 0) + deg) % 360 + 360) % 360 });
-    });
+    let updates;
+    if ( move === "forward" ) {
+      const step = area.r / RADAR_BANDS;
+      updates = radarShips(scene, center).map(t => {
+        const src = t._source;
+        return placeOnRadar(t, src.x + (src.width * grid) / 2, src.y + (src.height * grid) / 2 + step, area);
+      });
+    } else {
+      const deg = (move === "right") ? -FACING_DEGREES : FACING_DEGREES;
+      const a = Math.toRadians(deg), cos = Math.cos(a), sin = Math.sin(a);
+      updates = radarShips(scene, center).map(t => {
+        const src = t._source;
+        const dx = src.x + (src.width * grid) / 2 - area.x, dy = src.y + (src.height * grid) / 2 - area.y;
+        return placeOnRadar(t, area.x + dx * cos - dy * sin, area.y + dx * sin + dy * cos, area,
+          { rotation: (((src.rotation ?? 0) + deg) % 360 + 360) % 360 });
+      });
+    }
     if ( updates.length ) await scene.updateEmbeddedDocuments("Token", updates, { neonOdysseyResize: true });
-  });
+  }
 }
+Hooks.on(`${MODULE_ID}.shipSteered`, (actor, move) => { if ( isActiveGM() ) enqueue(() => radarFollow(actor, move)); });
 
 /* -------------------------------------------- */
 /*  Other ships' helm (radar)                   */
 /* -------------------------------------------- */
 // John, 2026-10-12: click a ship on the radar (GM) to steer it with Left / Forward / Right, using
-// that ship's own Speed and the same costs as the pilot (bands 1, 2, 4, 8, 16; facings 1, 2, 3...).
+// that ship's own Speed and the same costs as the pilot (2026-10-25: hexes 1, 2, 3...; facings 1, 3, 6, 12, 24; 60° each).
 // The ship's nose follows its token rotation (0 = toward the top of the radar). Its Speed left
 // this turn is kept on the token (flags.fvtt-neon-odyssey.helm) and refills each combat round,
 // or with the panel's New Turn button.
@@ -699,7 +755,7 @@ export async function steerShip(tokenDoc, action) {
       return;
     }
     const forward = action === "forward";
-    const cost = forward ? nextBandCost(st.bands) : nextFacingCost(st.facings);
+    const cost = forward ? nextForwardCost(st.bands) : nextFacingCost(st.facings);
     if ( st.left < cost ) {
       ui.notifications.warn(`${tokenDoc.name}: ${forward ? `band ${st.bands + 1}` : `facing ${st.facings + 1}`} this turn costs ${cost} Speed; only ${st.left} left.`);
       return;
@@ -765,9 +821,9 @@ class RadarHelm extends foundry.applications.api.ApplicationV2 {
     const t = this.tokenDoc;
     if ( !t ) return "";
     const st = helmState(t);
-    const band = nextBandCost(st.bands), turn = nextFacingCost(st.facings);
+    const band = nextForwardCost(st.bands), turn = nextFacingCost(st.facings);
     const dis = c => (st.left < c ? "disabled" : "");
-    const facing = Math.round(((t.rotation ?? 0) % 360 + 360) % 360 / FACING_DEGREES) || 12;
+    const facing = Math.round(((t.rotation ?? 0) % 360 + 360) % 360 / 30) || 12;
     return `<div class="radar-helm-body" style="display:flex;flex-direction:column;gap:6px;padding:4px">
       <div style="text-align:center"><strong>Speed ${st.left}</strong> of ${st.max} left
         <br><small>Heading ${facing} o'clock · ${st.bands} band${st.bands === 1 ? "" : "s"}, ${st.facings} turn${st.facings === 1 ? "" : "s"} this turn</small></div>
@@ -898,9 +954,21 @@ Hooks.on("dnd5e.preCreateUsageMessage", (activity, messageConfig) => {
   foundry.utils.setProperty(messageConfig, `data.flags.${MODULE_ID}.crew`, {
     ...cost,
     action: activity.name,
-    role: activity.item.getFlag(MODULE_ID, "crewRole")
+    role: activity.item.getFlag(MODULE_ID, "crewRole"),
+    shipUuid: actionShip(activity.item.actor)?.uuid ?? null
   });
 });
+
+/**
+ * The ship a crew action is for: the one the HUD named, else the ship on the current scene's
+ * display, else the ship whose crew record lists the character. A vehicle acting itself (enemy
+ * ships use Crew Role items of their own) is its own ship.
+ */
+export function actionShip(actor) {
+  if ( shipContext.uuid ) return fromUuidSync(shipContext.uuid);
+  if ( actor?.type === "vehicle" ) return actor;
+  return shipActor(canvas.scene) ?? shipForCrew(actor);
+}
 
 // Gain Tempo: pick a skill, roll it against DC = current Tempo.
 Hooks.on("dnd5e.postUseActivity", async activity => {
@@ -908,38 +976,58 @@ Hooks.on("dnd5e.postUseActivity", async activity => {
   if ( !cost?.gainTempo ) return;
   const actor = activity.item.actor;
   const scene = canvas.scene;
-  const dc = Math.max(GAIN_TEMPO_MIN_DC, readStat(scene, "Tempo") ?? 0);
+  const ship = actionShip(actor);   // read before the first await: the HUD's ship context is cleared after use()
+  const dc = Math.max(GAIN_TEMPO_MIN_DC, (ship ? getState(ship).tempo : readStat(scene, "Tempo")) ?? 0);
   const skills = Object.entries(CONFIG.DND5E.skills)
     .map(([k, s]) => `<option value="${k}">${s.label}</option>`).join("");
-  const skill = await foundry.applications.api.DialogV2.prompt({
+  // Rally's Command die (John, 2026-10-25), if this crew member holds one.
+  const SS = await import("./ship-state.mjs");
+  const dieKey = ship ? SS.crewKey(ship, actor.type === "vehicle" ? null : actor, "any") : null;
+  const die = dieKey ? SS.heldDie(ship, dieKey) : null;
+  const pick = await foundry.applications.api.DialogV2.prompt({
     window: { title: `Gain Tempo (DC ${dc})` },
     content: `<p>Choose a skill and describe how it readies the ship.</p>
-      <div class="form-group"><label>Skill</label><select name="skill">${skills}</select></div>`,
-    ok: { label: "Roll", callback: (event, button) => button.form.elements.skill.value },
+      <div class="form-group"><label>Skill</label><select name="skill">${skills}</select></div>
+      ${die ? `<div class="form-group"><label>Add Command die (${die})</label><input type="checkbox" name="die"></div>` : ""}`,
+    ok: { label: "Roll", callback: (event, button) => ({ skill: button.form.elements.skill.value, die: !!button.form.elements.die?.checked }) },
     rejectClose: false
   });
-  if ( !skill ) return;
+  if ( !pick?.skill ) return;
+  const skill = pick.skill;
+  const extra = pick.die ? await game.modules.get(MODULE_ID).fire?.spendDie(ship, dieKey) : null;
+  // A ship rolling for itself (an enemy) uses its crew bonus: d20 + bonus, success adds the bonus's PB share.
+  // So does a crewed ship whose crew quality is set on the ship (John, 2026-10-25: Swiffer's crew are +4);
+  // the quality then stands in for the characters' own skills.
+  const { crewBonus, crewQualitySet } = SS;
+  const shipCrew = (actor.type !== "vehicle") && ship && !SS.usesOwnStats(actor, ship);
+  if ( (actor.type === "vehicle") || shipCrew ) {
+    const bonus = crewBonus(shipCrew ? ship : actor, "any");
+    const roll = await new Roll(`1d20 + ${bonus}${extra ? ` + ${extra}` : ""}`).evaluate();
+    await roll.toMessage({ speaker: ChatMessage.implementation.getSpeaker({ actor }), flavor: `Gain Tempo (crew +${bonus}${extra ? `, Command die ${extra}` : ""}) vs DC ${dc}`,
+      flags: { [MODULE_ID]: { gainTempo: { dc, prof: Math.max(GAIN_TEMPO_MIN_GAIN, Number(actor.flags?.[MODULE_ID]?.prof) || 2), sceneId: scene?.id, shipUuid: ship?.uuid ?? null } } } });
+    return;
+  }
   const prof = Math.max(GAIN_TEMPO_MIN_GAIN, actor.system.skills?.[skill]?.prof?.flat ?? 0);
-  await actor.rollSkill({ skill, target: dc }, {}, {
-    data: { flags: { [MODULE_ID]: { gainTempo: { dc, prof, sceneId: scene?.id } } } }
+  await actor.rollSkill({ skill, target: dc, ...(extra ? { bonus: extra } : {}) }, {}, {
+    data: { flags: { [MODULE_ID]: { gainTempo: { dc, prof, sceneId: scene?.id, shipUuid: ship?.uuid ?? null } } } }
   });
 });
 
 /**
- * Apply a Tempo/Strain change to the scene's drawings and report it in chat.
+ * Apply a Tempo/Strain change to a ship and report it in chat.
  * @param {Scene} scene
  * @param {object} cost      { tempo, strain, strainDelta, tempoGain }
- * @param {object} context   { actor, label }
+ * @param {object} context   { actor, label, ship }  ship defaults to the scene's display ship
  */
-export async function applyCost(scene, cost, { actor, label } = {}) {
-  const tempoD = statDrawing(scene, "Tempo");
-  const strainD = statDrawing(scene, "Strain");
-  if ( !tempoD || !strainD ) {
-    ui.notifications.warn(`${label}: this scene has no drawings tagged "Tempo" and "Strain".`);
+export async function applyCost(scene, cost, { actor, label, ship } = {}) {
+  ship ??= shipActor(scene);
+  if ( !ship && (!statDrawing(scene, "Tempo") || !statDrawing(scene, "Strain")) ) {
+    ui.notifications.warn(`${label}: no ship for this action, and this scene has no drawings tagged "Tempo" and "Strain".`);
     return;
   }
-  const tempo0 = readStat(scene, "Tempo");
-  const strain0 = readStat(scene, "Strain");
+  const st0 = ship ? getState(ship) : null;
+  const tempo0 = ship ? st0.tempo : readDrawing(scene, "Tempo");
+  const strain0 = ship ? st0.strain : readDrawing(scene, "Strain");
   let tempo = tempo0;
   let strain = strain0;
   const notes = [];
@@ -957,24 +1045,21 @@ export async function applyCost(scene, cost, { actor, label } = {}) {
   strain = Math.max(0, strain);
   tempo = Math.max(0, tempo);
 
-  if ( tempo !== tempo0 ) await tempoD.update({ text: String(tempo) });
-  if ( strain !== strain0 ) await strainD.update({ text: String(strain) });
-
-  // Mishaps: one for every multiple of the Mishap Threshold that Strain passed on the way up.
-  const ship = shipActor(scene);
-  const hp = ship?.system.attributes?.hp;
-  const mt = Number(hp?.mt) || 0;
-  let alert = "";
-  if ( mt > 0 && strain > strain0 ) alert += await mishapAlert(ship, strain0, strain);
-  if ( hp?.max && strain >= hp.max && strain0 < hp.max ) {
-    alert += `<p class="no-crew-alert"><strong>SHIP DISABLED.</strong> Strain has reached the ship's maximum Hit Points (${hp.max}).
-      No station can act until Mishaps are Corrected.</p>`;
+  if ( ship ) {
+    if ( (tempo !== tempo0) || (strain !== strain0) ) await setState(ship, { tempo, strain });
+  } else {
+    if ( tempo !== tempo0 ) await statDrawing(scene, "Tempo").update({ text: String(tempo) });
+    if ( strain !== strain0 ) await statDrawing(scene, "Strain").update({ text: String(strain) });
   }
+
+  // Mishaps: one for every multiple of the Mishap Threshold that Strain passed on the way up,
+  // recorded on the system that suffered it; Disabled at max HP.
+  const alert = ship ? await strainAlerts(ship, strain0, strain) : "";
 
   const fmt = (a, b) => (a === b ? `${b}` : `${a} → <strong>${b}</strong>`);
   const content = `<div class="no-crew-card">
     <h3>${label ?? "Crew Action"}</h3>
-    <p>Tempo ${fmt(tempo0, tempo)} &nbsp;·&nbsp; Strain ${fmt(strain0, strain)}</p>
+    <p>${ship ? `${ship.name}: ` : ""}Tempo ${fmt(tempo0, tempo)} &nbsp;·&nbsp; Strain ${fmt(strain0, strain)}</p>
     ${notes.map(n => `<p>${n}</p>`).join("")}${alert}</div>`;
   await ChatMessage.implementation.create({
     content,
@@ -1010,8 +1095,8 @@ export async function resetStats(scene = canvas.scene) {
     ui.notifications.warn("Only a GM can reset Tempo.");
     return;
   }
-  const tempoD = statDrawing(scene, "tempo");
-  if ( !tempoD ) return ui.notifications.warn(`No drawing tagged "Tempo" on ${scene?.name}.`);
+  const tempoD = statDrawing(scene, "tempo") ?? shipActor(scene);
+  if ( !tempoD ) return ui.notifications.warn(`No ship on the display and no drawing tagged "Tempo" on ${scene?.name}.`);
   const crew = crewOnStations(scene);
   const names = crew.map(a => a.name).join(", ") || "none";
   const ship = shipActor(scene);
@@ -1035,9 +1120,9 @@ export async function resetStats(scene = canvas.scene) {
   if ( !result || (typeof result !== "object") ) return;
   const tempo = result.surprised ? 0 : start;
   return enqueue(async () => {
-    await tempoD.update({ text: String(tempo) });
-    const strainD = statDrawing(scene, "strain");
-    if ( result.clearStrain && strainD ) await strainD.update({ text: "0" });
+    await writeStat(scene, "tempo", tempo);
+    const strainD = statDrawing(scene, "strain") ?? shipActor(scene);
+    if ( result.clearStrain && strainD ) await writeStat(scene, "strain", 0);
     await ChatMessage.implementation.create({
       content: `<div class="no-crew-card"><h3>Tempo reset</h3>
         <p>Tempo <strong>${tempo}</strong> (${result.surprised ? "surprised" : `${crew.length} on stations${pb ? ` + ${pb} ship` : ""}`})${
@@ -1061,10 +1146,12 @@ export async function adjustStat(tag, delta, scene = canvas.scene) {
     ui.notifications.warn("Only a GM client can change Tempo and Strain.");
     return;
   }
+  const ship = shipActor(scene);
+  if ( ship ) return request({ action: "adjust", uuid: ship.uuid, stat: String(tag).toLowerCase(), delta });
   return enqueue(async () => {
     const d = statDrawing(scene, tag);
     if ( !d ) return ui.notifications.warn(`No drawing tagged "${tag}" on ${scene?.name}.`);
-    const before = readStat(scene, tag);
+    const before = readDrawing(scene, tag);
     const after = Math.max(0, before + delta);
     if ( after === before ) return;
     await d.update({ text: String(after) });
@@ -1072,9 +1159,9 @@ export async function adjustStat(tag, delta, scene = canvas.scene) {
     const hp = shipActor(scene)?.system.attributes?.hp;
     const mt = Number(hp?.mt) || 0;
     let alert = "";
-    if ( mt > 0 ) alert += await mishapAlert(shipActor(scene), before, after);
-    if ( hp?.max && after >= hp.max && before < hp.max ) {
-      alert += `<p class="no-crew-alert"><strong>SHIP DISABLED.</strong> Strain has reached the ship's maximum Hit Points (${hp.max}).</p>`;
+    // No ship on the display here, so there is no ship to give a Mishap to.
+    if ( hp?.max && after > hp.max && before <= hp.max ) {
+      alert += `<p class="no-crew-alert"><strong>SHIP DISABLED.</strong> Strain is over the ship's maximum Hit Points (${hp.max}).</p>`;
     }
     if ( alert ) await ChatMessage.implementation.create({
       content: `<div class="no-crew-card"><h3>Strain ${before} → ${after}</h3>${alert}</div>`,
@@ -1126,7 +1213,20 @@ async function syncGauges(scene = canvas.scene) {
 Hooks.on("updateDrawing", (drawing, changes) => {
   if ( !isActiveGM() || !("text" in changes) ) return;
   const tags = tagsOf(drawing);
+  // A number typed into the bridge drawing by hand becomes the ship's value.
+  for ( const tag of ["tempo", "strain", "speed"].filter(t => tags.includes(t)) ) {
+    const ship = statShip(drawing.parent, tag);
+    const n = parseInt(String(drawing.text ?? "").replace(/[^\d-]/g, ""), 10);
+    if ( ship && Number.isFinite(n) && ((tag === "speed") || hasState(ship)) && (getState(ship)[tag] !== Math.max(0, n)) ) {
+      enqueue(() => setState(ship, { [tag]: n }));
+    }
+  }
   if ( tags.includes("tempo") || tags.includes("strain") ) enqueue(() => syncGauges(drawing.parent));
+});
+// The ship's state changed (HUD, sector map, crew action): show it on every bridge showing the ship.
+Hooks.on("updateActor", (actor, changes) => {
+  if ( !isActiveGM() || (actor.type !== "vehicle") ) return;
+  if ( foundry.utils.hasProperty(changes, `flags.${MODULE_ID}.state`) ) enqueue(() => syncShipDrawings(actor));
 });
 Hooks.on("updateActor", (actor, changes) => {
   if ( !isActiveGM() || (actor.type !== "vehicle") ) return;
@@ -1144,6 +1244,8 @@ Hooks.on("createDrawing", drawing => {
 });
 Hooks.on("canvasReady", () => {
   if ( !isActiveGM() ) return;
+  const ship = shipActor(canvas.scene);
+  if ( ship ) enqueue(() => syncShipDrawings(ship));
   enqueue(() => syncGauges(canvas.scene));
   enqueue(() => syncSpeed(canvas.scene));
 });
@@ -1166,19 +1268,24 @@ Hooks.on("createChatMessage", message => {
     const scene = game.scenes.get(message.speaker?.scene) ?? canvas.scene;
     const actor = message.getAssociatedActor?.();
     const c = flags.crew;
+    const ship = (c.shipUuid ? fromUuidSync(c.shipUuid) : null) ?? shipActor(scene);
     const bits = [c.tempo ? `${c.tempo} Tempo` : null, c.strain ? `+${c.strain} Strain` : null].filter(Boolean);
-    enqueue(() => applyCost(scene, c, { actor, label: `${c.action}${bits.length ? ` (${bits.join(", ")})` : ""}` }));
+    enqueue(() => applyCost(scene, c, { actor, ship, label: `${c.action}${bits.length ? ` (${bits.join(", ")})` : ""}` }));
     // The Helmsman's Maneuver starts the pilot's turn: Speed refills to the ship's Speed.
-    if ( c.action === "Maneuver" ) enqueue(() => syncSpeed(scene, { force: true }));
+    if ( c.action === "Maneuver" ) enqueue(async () => {
+      if ( ship ) await refillSpeed(ship);
+      else await syncSpeed(scene, { force: true });
+    });
   }
 
   if ( flags.gainTempo ) {
     const roll = message.rolls?.[0];
     if ( !roll ) return;
-    const { sceneId } = flags.gainTempo;
+    const { sceneId, shipUuid } = flags.gainTempo;
     // Enforce the minimums here too, in case the roll came from a client on older code.
     const dc = Math.max(GAIN_TEMPO_MIN_DC, Number(flags.gainTempo.dc) || 0);
-    const prof = Math.max(GAIN_TEMPO_MIN_GAIN, Number(flags.gainTempo.prof) || 0);
+    // Effects use fixed numbers, not PB (John, 2026-10-25): a success adds 2 Tempo.
+    const prof = GAIN_TEMPO_AMOUNT;
     const scene = game.scenes.get(sceneId) ?? canvas.scene;
     const actor = message.getAssociatedActor?.();
     const success = roll.total >= dc;
@@ -1186,8 +1293,11 @@ Hooks.on("createChatMessage", message => {
     const parts = [];
     if ( success ) { cost.tempoGain += prof; parts.push(`success, +${prof} Tempo`); }
     else { cost.strainDelta += 1; parts.push("failure, +1 Strain"); }
-    if ( roll.isCritical ) { cost.tempoGain += 1; parts.push("critical, +1 Tempo"); }
-    if ( roll.isFumble ) { cost.strainDelta += 1; parts.push("fumble, +1 Strain"); }
-    enqueue(() => applyCost(scene, cost, { actor, label: `Gain Tempo: ${roll.total} vs DC ${dc} (${parts.join("; ")})` }));
+    // A plain Roll (crew-quality and enemy rolls) has no isCritical / isFumble: read the d20 itself.
+    const nat = roll.dice?.find(d => d.faces === 20)?.results?.find(r => r.active !== false)?.result;
+    if ( roll.isCritical ?? (nat === 20) ) { cost.tempoGain += 1; parts.push("critical, +1 Tempo"); }
+    if ( roll.isFumble ?? (nat === 1) ) { cost.strainDelta += 1; parts.push("fumble, +1 Strain"); }
+    const ship = (shipUuid ? fromUuidSync(shipUuid) : null) ?? shipActor(scene);
+    enqueue(() => applyCost(scene, cost, { actor, ship, label: `Gain Tempo: ${roll.total} vs DC ${dc} (${parts.join("; ")})` }));
   }
 });

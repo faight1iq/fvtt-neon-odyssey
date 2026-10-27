@@ -3,10 +3,12 @@
 // if it is moved off the tile.
 //
 // Mark a tile:   tile.setFlag("fvtt-neon-odyssey", "sectorMap", true)
-// Optional:      tile.setFlag("fvtt-neon-odyssey", "sectorScale", 0.9)   // image scale inside the hex
+// (The old sectorScale tile flag is no longer used: the scale follows the ship's size.)
+
+import { sectorTokenSize } from "./ship-state.mjs";
 
 const MODULE_ID = "fvtt-neon-odyssey";
-const DEFAULT_SCALE = 0.9;
+// The art scale inside the hex follows the ship's size (John, 2026-10-26): Gargantuan 1.0 … Tiny 0.25.
 
 /** Sector-map tiles on a scene whose rectangle contains the point. */
 function sectorTileAt(scene, point) {
@@ -38,8 +40,8 @@ function cellTopLeft(scene, point) {
 }
 
 /** Changes that shrink a token into one hex, remembering its size. */
-function fitChanges(scene, src, tile, point) {
-  const scale = Number(tile.getFlag(MODULE_ID, "sectorScale")) || DEFAULT_SCALE;
+function fitChanges(scene, src, tile, point, actor) {
+  const scale = sectorTokenSize(actor);
   const tl = cellTopLeft(scene, point);
   const prior = src.flags?.[MODULE_ID]?.sectorFit;
   return {
@@ -60,7 +62,7 @@ Hooks.on("preCreateToken", (doc, data, options, userId) => {
   const point = centerOf(scene, src);
   const tile = sectorTileAt(scene, point);
   if ( !tile ) return;
-  doc.updateSource(foundry.utils.expandObject(fitChanges(scene, src, tile, point)));
+  doc.updateSource(foundry.utils.expandObject(fitChanges(scene, src, tile, point, doc.actor)));
 });
 
 Hooks.on("preUpdateToken", (doc, changes, options, userId) => {
@@ -78,7 +80,7 @@ Hooks.on("preUpdateToken", (doc, changes, options, userId) => {
   if ( tile ) {
     // On the sector map: always one hex.
     // Size only: in v13 a move's x/y belong to the movement API, so they are left alone here.
-    const fit = fitChanges(scene, src, tile, point);
+    const fit = fitChanges(scene, src, tile, point, doc.actor);
     delete fit.x; delete fit.y;
     if ( src.width === 1 && src.height === 1 && !resized ) return;
     foundry.utils.mergeObject(changes, foundry.utils.expandObject(fit));
@@ -102,7 +104,7 @@ export async function fitSceneShips(scene = canvas.scene) {
     const point = centerOf(scene, src);
     const tile = sectorTileAt(scene, point);
     if ( !tile ) continue;
-    updates.push({ _id: t.id, ...fitChanges(scene, src, tile, point) });
+    updates.push({ _id: t.id, ...fitChanges(scene, src, tile, point, t.actor) });
   }
   if ( updates.length ) await scene.updateEmbeddedDocuments("Token", updates, { [`${MODULE_ID}.sectorFit`]: true });
   return updates.length;

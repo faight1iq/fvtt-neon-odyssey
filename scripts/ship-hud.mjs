@@ -65,6 +65,20 @@ const cap = w => w ? w[0].toUpperCase() + w.slice(1) : w;
 const isGM = () => game.users.activeGM?.isSelf;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/**
+ * The one GM client that builds a bridge's HUD: building needs the scene on that client's canvas.
+ * The active GM if it is viewing the scene, otherwise the first other GM viewing it (by id), or null.
+ * Every client works this out the same way, so two GMs never build at once.
+ */
+function hudBuilder(scene) {
+  if ( !scene ) return null;
+  const viewing = game.users.filter(u => u.active && u.isGM && (u.viewedScene === scene.id));
+  if ( !viewing.length ) return null;
+  const active = game.users.activeGM;
+  if ( active && viewing.includes(active) ) return active;
+  return viewing.sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+
 /* -------------------------------------------- */
 /*  Finding things                              */
 /* -------------------------------------------- */
@@ -279,12 +293,17 @@ export function refreshHud(scene = canvas.scene) { return serial(() => _build(sc
 export function teardownHud(scene = canvas.scene) { return serial(() => _teardown(scene, { full: true })); }
 
 async function _build(scene, { full }) {
-  if ( !isGM() || !scene ) return;
+  if ( !game.user.isGM || !scene ) return;
   const tile = displayTile(scene);
   const ship = shipOnDisplay(scene);
   if ( !tile || !ship?.actor ) return;
   if ( canvas.scene?.id !== scene.id ) {
-    ui.notifications.warn("Ship HUD: open the bridge scene to build its HUD.");
+    // Building needs the bridge on this client's canvas. Mark it pending: a GM viewing the bridge builds
+    // it now (updateTile hook below), or the first GM to open the bridge does (canvasReady).
+    if ( full || tile.getFlag(MODULE_ID, "hud") ) {
+      if ( !tile.getFlag(MODULE_ID, "hudPending") ) await tile.setFlag(MODULE_ID, "hudPending", full ? "full" : "parts");
+      if ( !hudBuilder(scene) ) ui.notifications.info(`Ship HUD for ${scene.name} will be rebuilt when a GM opens that scene.`);
+    }
     return;
   }
   const record = tile.getFlag(MODULE_ID, "hud");
@@ -338,6 +357,8 @@ async function _build(scene, { full }) {
         const cx = radarTile.x + Math.abs(radarTile.width) / 2, cy = radarTile.y + Math.abs(radarTile.height) / 2;
         const td = (await base.getTokenDocument({ x: cx - grid / 2, y: cy - grid / 2, width: 1, height: 1,
           disposition: CONST.TOKEN_DISPOSITIONS.FRIENDLY, rotation: 0, name: ship.name === "Vehicle" ? base.name : ship.name })).toObject();
+        // The same actor as the ship on the display (John, 2026-10-25: Tempo, Strain and Speed live on it).
+        td.actorLink = !!ship.actorLink;
         if ( !ship.actorLink ) td.delta = foundry.utils.deepClone(ship._source.delta ?? {});
         delete td.flags?.["token-attacher"];
         foundry.utils.setProperty(td, `flags.${MODULE_ID}.hudBuilt`, true);
@@ -433,9 +454,12 @@ async function _build(scene, { full }) {
   }
 
   await tile.setFlag(MODULE_ID, "hud", rec);
+  if ( tile.getFlag(MODULE_ID, "hudPending") ) await tile.unsetFlag(MODULE_ID, "hudPending");
   const crew = game.modules.get(MODULE_ID).crew;
   await crew?.reconcileScene?.(scene);
-  await crew?.syncSpeed?.(scene, { force: true });
+  // A (re)build refills Speed, except during an encounter: there only Maneuver refills it (John, 2026-10-25).
+  const fighting = game.modules.get(MODULE_ID).ship?.inCombat?.(ship.actor);
+  await crew?.syncSpeed?.(scene, { force: !fighting });
 }
 
 async function _teardown(scene, { full }) {
@@ -464,6 +488,17 @@ async function _teardown(scene, { full }) {
 Hooks.once("ready", () => {
   const mod = game.modules.get(MODULE_ID);
   mod.hud = { buildHud, refreshHud, teardownHud, shortName };
+});
+
+// A HUD marked pending (it couldn't be built where the change happened) is built by the GM viewing the bridge.
+function tryPending(scene) {
+  const p = displayTile(scene)?.getFlag(MODULE_ID, "hudPending");
+  if ( !p || !game.user.isGM || (canvas.scene?.id !== scene?.id) || !hudBuilder(scene)?.isSelf ) return;
+  (p === "full" ? buildHud : refreshHud)(scene);
+}
+Hooks.on("canvasReady", () => tryPending(canvas.scene));
+Hooks.on("updateTile", (tile, changes) => {
+  if ( foundry.utils.hasProperty(changes, `flags.${MODULE_ID}.hudPending`) ) tryPending(tile.parent);
 });
 
 // From crew-stations.mjs: a ship arrived on or left the display.
@@ -496,3 +531,287 @@ Hooks.on("updateItem", (item, changes) => {
     pending.set(scene.id, setTimeout(() => refreshHud(scene), 750));
   }
 });
+
+/* -------------------------------------------- */
+/*  Mishap tokens on the Component Area         */
+/* -------------------------------------------- */
+// John, 2026-10-25: a Mishap actor dropped (as a token) on a system block of the bridge's Component Area
+// is an active Mishap on that system of the ship on the display. Moving the token to another block moves
+// the Mishap; moving it off the blocks, or deleting it, removes it. These entries carry the token's id
+// (fromToken), so Mishaps recorded another way (MISHAP! alerts, a drop on the ship) are left alone.
+
+/** The Component Area block (system key) under a point on a bridge scene, or null. */
+/** A system block's square on the bridge's Component Area, in scene pixels: { x, y, w }, or null. */
+export function blockRect(scene, key) {
+  const area = scene?.tiles.find(t => t.getFlag(MODULE_ID, "componentArea"));
+  if ( !area || !BLOCKS[key] ) return null;
+  const k = Math.abs(area.width) / LAYOUT.area.w;
+  const b = { ...BLOCKS[key] };
+  if ( (key === "propulsion") && scene.drawings.some(d => d.getFlag(MODULE_ID, "hudBlock") === "aft") ) b.x = BLOCKS.command.x;
+  return { x: area.x + b.x * k, y: area.y + b.y * k, w: b.w * k };
+}
+
+export function blockAt(scene, point) {
+  const area = scene?.tiles.find(t => t.getFlag(MODULE_ID, "componentArea"));
+  if ( !area ) return null;
+  const k = Math.abs(area.width) / LAYOUT.area.w;
+  const placed = foundry.utils.deepClone(BLOCKS);
+  if ( scene.drawings.some(d => d.getFlag(MODULE_ID, "hudBlock") === "aft") ) placed.propulsion.x = BLOCKS.command.x;
+  for ( const [key, b] of Object.entries(placed) ) {
+    const x = area.x + b.x * k, y = area.y + b.y * k, w = b.w * k;
+    if ( (point.x >= x) && (point.x <= x + w) && (point.y >= y) && (point.y <= y + w) ) return key;
+  }
+  return null;
+}
+
+const mishapOf = tokenDoc => tokenDoc?.actor?.flags?.[MODULE_ID]?.mishap ?? null;
+
+/** Rebuild the display ship's block-placed Mishaps from the Mishap tokens on this bridge (GM). */
+async function syncBlockMishaps(scene) {
+  if ( !isGM() || !scene ) return;
+  const shipToken = shipOnDisplay(scene);
+  const crew = game.modules.get(MODULE_ID).crew;
+  const ship = crew?.shipActor?.(scene) ?? shipToken?.actor;
+  if ( !ship ) return;
+  const grid = scene.grid.size;
+  const fromTokens = [];
+  for ( const t of scene.tokens ) {
+    const m = mishapOf(t);
+    if ( !m || entryOf(t) ) continue;   // tokens kept by the Mishap-token sync stand for existing entries
+    const s = t._source;
+    const system = blockAt(scene, { x: s.x + (s.width * grid) / 2, y: s.y + (s.height * grid) / 2 });
+    if ( !system ) continue;
+    const uuid = t.actor?.flags?.core?.sourceId ?? t.actor?._stats?.compendiumSource ?? null;
+    fromTokens.push({ id: `tok${t.id}`, fromToken: t.id, system, uuid, name: t.name, img: t.texture?.src ?? t.actor?.img, tier: m.tier ?? null });
+  }
+  const list = ship.flags?.[MODULE_ID]?.activeMishaps ?? [];
+  const next = [...list.filter(m => !m.fromToken), ...fromTokens];
+  const sig = l => JSON.stringify(l.map(m => [m.id, m.system, m.name]).sort());
+  if ( sig(next) !== sig(list) ) await ship.update({ [`flags.${MODULE_ID}.activeMishaps`]: next });
+}
+
+const blockTimers = new Map();
+function scheduleBlockMishaps(scene) {
+  if ( !isGM() || !scene?.tiles.some(t => t.getFlag(MODULE_ID, "componentArea")) ) return;
+  clearTimeout(blockTimers.get(scene.id));
+  blockTimers.set(scene.id, setTimeout(() => serial(() => syncBlockMishaps(scene)), 300));
+}
+Hooks.on("createToken", doc => { if ( mishapOf(doc) ) scheduleBlockMishaps(doc.parent); });
+Hooks.on("deleteToken", doc => { if ( mishapOf(doc) ) scheduleBlockMishaps(doc.parent); });
+Hooks.on("updateToken", (doc, changes) => { if ( mishapOf(doc) && (("x" in changes) || ("y" in changes)) ) scheduleBlockMishaps(doc.parent); });
+Hooks.on("canvasReady", () => scheduleBlockMishaps(canvas.scene));
+Hooks.on(`${MODULE_ID}.viewscreenEnter`, doc => setTimeout(() => scheduleBlockMishaps(doc.parent), 3000));
+
+/* -------------------------------------------- */
+/*  Mishaps as tokens on the bridge             */
+/* -------------------------------------------- */
+// (John, 2026-10-26) On a bridge HUD, every Mishap on the display ship is a token on its system's card, so
+// players can see it (name and HP on hover), target it and fight it: Mishaps are the ship's monsters.
+//  - The GM keeps the tokens in step with the ship's Mishap list (flags.activeMishaps): one token per entry,
+//    flagged mishapEntry = entry id. A new Mishap gets a token; a cleared one loses it.
+//  - The token's HP is the Mishap's HP: Correct lowers both; damage dealt to the token lowers the Mishap's HP,
+//    and at 0 HP the Mishap is cleared. Deleting the token clears the Mishap; dragging it to another system
+//    card moves it there.
+//  - Mishaps the GM placed as tokens by hand (fromToken entries) are already tokens and are left alone.
+
+const entryOf = doc => doc?.getFlag?.(MODULE_ID, "mishapEntry") ?? null;
+const syncing = new Set();   // entry ids whose tokens the sync itself is deleting
+
+/** A world actor for a Mishap (the compendium one is imported into the Mishaps folder once). */
+export async function mishapWorldActor(entry) {
+  if ( !entry?.uuid ) return null;
+  const src = await fromUuid(entry.uuid);
+  if ( !src || (src.documentName !== "Actor") ) return null;
+  if ( !src.pack ) return src;
+  const have = game.actors.find(a => (a._stats?.compendiumSource ?? a.flags?.core?.sourceId) === entry.uuid);
+  if ( have ) return have;
+  const folder = game.folders.find(f => (f.type === "Actor") && (f.name === "Mishaps"))
+    ?? await Folder.implementation.create({ name: "Mishaps", type: "Actor" });
+  return game.actors.importFromCompendium(game.packs.get(src.pack), src.id, { folder: folder.id });
+}
+
+/** Where the i-th of n Mishap tokens sits on a system card: { x, y, size } (token top-left, grid units). */
+function mishapSpot(scene, system, i, n) {
+  const card = blockRect(scene, system);
+  if ( !card ) return null;
+  const grid = scene.grid.size;
+  const px = Math.min(0.3 * card.w, (0.92 * card.w) / Math.max(1, n));
+  const size = Math.max(0.5, Math.round((px / grid) * 20) / 20);
+  const step = Math.min(size * grid * 1.05, (card.w - size * grid) / Math.max(1, n - 1));
+  const rowW = size * grid + step * (n - 1);
+  return { x: card.x + (card.w - rowW) / 2 + i * step, y: card.y + card.w - size * grid - 0.05 * card.w, size };
+}
+
+async function syncMishapTokens(scene) {
+  if ( !isGM() || !scene?.tiles.some(t => t.getFlag(MODULE_ID, "componentArea")) ) return;
+  const ship = game.modules.get(MODULE_ID).crew?.shipActor?.(scene) ?? shipOnDisplay(scene)?.actor;
+  if ( !ship ) return;
+  const list = (ship.flags?.[MODULE_ID]?.activeMishaps ?? []).filter(m => !m.fromToken && blockRect(scene, m.system));
+  const ids = new Set(list.map(m => m.id));
+  const tokens = scene.tokens.filter(t => entryOf(t));
+  // Cleared Mishaps lose their tokens (and duplicates go).
+  const seen = new Set(), gone = [];
+  for ( const t of tokens ) {
+    const id = entryOf(t);
+    if ( !ids.has(id) || seen.has(id) ) gone.push(t.id); else seen.add(id);
+  }
+  if ( gone.length ) {
+    gone.forEach(id => syncing.add(entryOf(scene.tokens.get(id))));
+    await scene.deleteEmbeddedDocuments("Token", gone);
+  }
+  // New Mishaps get tokens; every token sits in its card's row with the Mishap's HP.
+  const bySystem = {};
+  for ( const m of list ) (bySystem[m.system] ??= []).push(m);
+  const create = [], update = [];
+  for ( const [system, ms] of Object.entries(bySystem) ) {
+    for ( const [i, m] of ms.entries() ) {
+      const spot = mishapSpot(scene, system, i, ms.length);
+      if ( !spot ) continue;
+      let tok = scene.tokens.find(t => entryOf(t) === m.id);
+      // The Mishap changed into another (Fire Suppression knocked it down a level): replace its token.
+      if ( tok && (tok.name !== m.name) ) { syncing.add(m.id); await tok.delete(); tok = null; }
+      if ( tok ) {
+        const upd = { _id: tok.id };
+        if ( (Math.abs(tok.x - spot.x) > 1) || (Math.abs(tok.y - spot.y) > 1) ) Object.assign(upd, { x: spot.x, y: spot.y });
+        if ( tok.width !== spot.size ) Object.assign(upd, { width: spot.size, height: spot.size });
+        const hp = Number(tok.actor?.system.attributes?.hp?.value);
+        if ( (m.hp != null) && (hp !== m.hp) ) upd["delta.system.attributes.hp.value"] = m.hp;
+        if ( Object.keys(upd).length > 1 ) update.push(upd);
+        continue;
+      }
+      const actor = await mishapWorldActor(m);
+      if ( !actor ) continue;
+      const max = Number(actor.system.attributes?.hp?.max) || 20;
+      const td = (await actor.getTokenDocument({
+        x: spot.x, y: spot.y, width: spot.size, height: spot.size, name: m.name,
+        actorLink: false, disposition: CONST.TOKEN_DISPOSITIONS.HOSTILE,
+        displayName: CONST.TOKEN_DISPLAY_MODES.HOVER, displayBars: CONST.TOKEN_DISPLAY_MODES.HOVER,
+        bar1: { attribute: "attributes.hp" }, lockRotation: true, rotation: 0
+      })).toObject();
+      foundry.utils.setProperty(td, "texture.src", m.img || td.texture?.src);
+      foundry.utils.setProperty(td, `flags.${MODULE_ID}.mishapEntry`, m.id);
+      foundry.utils.setProperty(td, `flags.${MODULE_ID}.mishapShip`, ship.uuid);
+      foundry.utils.setProperty(td, "delta.system.attributes.hp.value", m.hp ?? max);
+      if ( td.ring ) td.ring.enabled = false;
+      create.push(td);
+    }
+  }
+  if ( update.length ) await scene.updateEmbeddedDocuments("Token", update, { animate: false });
+  if ( create.length ) await scene.createEmbeddedDocuments("Token", create);
+}
+
+const mishapTimers = new Map();
+export function scheduleMishapTokens(scene) {
+  if ( !isGM() || !scene?.tiles.some(t => t.getFlag(MODULE_ID, "componentArea")) ) return;
+  clearTimeout(mishapTimers.get(scene.id));
+  mishapTimers.set(scene.id, setTimeout(() => serial(() => syncMishapTokens(scene)), 400));
+}
+/** Bridge scenes showing this ship. */
+function bridgesOf(actor) {
+  const base = actor?.isToken ? game.actors.get(actor.token?.actorId) : actor;
+  return game.scenes.filter(s => s.tiles.some(t => t.getFlag(MODULE_ID, "componentArea"))
+    && s.tokens.some(t => t.getFlag(MODULE_ID, "viewSize") && ((t.actor === actor) || (t.actorLink && (t.actorId === base?.id)))));
+}
+Hooks.on("updateActor", (actor, changes) => {
+  if ( (actor.type !== "vehicle") || !foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`) ) return;
+  for ( const s of bridgesOf(actor) ) scheduleMishapTokens(s);
+});
+Hooks.on("canvasReady", () => scheduleMishapTokens(canvas.scene));
+
+/** The ship and Mishap entry behind a Mishap token. */
+async function entryFor(doc) {
+  const id = entryOf(doc);
+  const ship = id ? await fromUuid(doc.getFlag(MODULE_ID, "mishapShip") ?? "") : null;
+  const entry = ship?.flags?.[MODULE_ID]?.activeMishaps?.find(m => m.id === id);
+  return entry ? { ship, entry } : null;
+}
+
+// Damage to the token is damage to the Mishap; a token dragged to another card moves the Mishap there.
+Hooks.on("updateActor", (actor, changes) => {
+  if ( actor.isToken && entryOf(actor.token) && foundry.utils.hasProperty(changes, "system.attributes.hp") ) mishapTokenChanged(actor.token, true, false);
+});
+Hooks.on("updateToken", (doc, changes) => {
+  if ( !entryOf(doc) ) return;
+  mishapTokenChanged(doc, foundry.utils.hasProperty(changes, "delta.system.attributes.hp"), ("x" in changes) || ("y" in changes));
+});
+function mishapTokenChanged(doc, hpChanged, moved) {
+  if ( !isGM() ) return;
+  if ( !hpChanged && !moved ) return;
+  serial(async () => {
+    const found = await entryFor(doc);
+    if ( !found ) return;
+    const { ship, entry } = found;
+    const S = await import("./ship-state.mjs");
+    if ( hpChanged ) {
+      const hp = Number(doc.actor?.system.attributes?.hp?.value);
+      if ( Number.isFinite(hp) && (hp <= 0) ) {
+        await S.removeMishap(ship, entry.id);
+        await ChatMessage.implementation.create({ content: `<div class="no-crew-card"><p><strong>${foundry.utils.escapeHTML(entry.name)}</strong> is down to 0 HP: repaired.</p></div>` });
+        return;
+      }
+      if ( Number.isFinite(hp) && (hp !== entry.hp) ) {
+        await ship.update({ [`flags.${MODULE_ID}.activeMishaps`]: S.activeMishaps(ship).map(m => m.id === entry.id ? { ...m, hp } : m) });
+      }
+    }
+    if ( moved ) {
+      const s = doc._source, grid = doc.parent.grid.size;
+      const system = blockAt(doc.parent, { x: s.x + (s.width * grid) / 2, y: s.y + (s.height * grid) / 2 });
+      if ( system && (system !== entry.system) ) {
+        await ship.update({ [`flags.${MODULE_ID}.activeMishaps`]: S.activeMishaps(ship).map(m => m.id === entry.id ? { ...m, system } : m) });
+      }
+      scheduleMishapTokens(doc.parent);   // snap back into its card's row
+    }
+  });
+}
+
+// Deleting a Mishap token (not by the sync) clears the Mishap.
+Hooks.on("deleteToken", doc => {
+  const id = entryOf(doc);
+  if ( !isGM() || !id ) return;
+  if ( syncing.delete(id) ) return;
+  serial(async () => {
+    const found = await entryFor(doc);
+    if ( found ) await (await import("./ship-state.mjs")).removeMishap(found.ship, id);
+  });
+});
+
+/* -------------------------------------------- */
+/*  Crew who leave their station to Correct     */
+/* -------------------------------------------- */
+// (John, 2026-10-26) A character who leaves their station to Correct walks there: their token on the bridge
+// moves from the station to the Mishap's system card. They go back to their station at the start of the
+// ship's next turn (when their actions come back). The station spot is kept on the token (flags.crewHome).
+
+export function bridgeOf(ship) {
+  const base = ship?.isToken ? game.actors.get(ship.token?.actorId) : ship;
+  const id = base?.getFlag(MODULE_ID, "bridgeSceneId");
+  return (id && game.scenes.get(id)) || game.scenes.find(s => s.tokens.some(t => (t.actorId === base?.id) && t.getFlag(MODULE_ID, "viewSize"))) || null;
+}
+
+/** Move a crew character's bridge token to the card of the Mishap they are correcting (GM). */
+export async function crewToMishap(ship, crewActor, entry) {
+  const scene = bridgeOf(ship);
+  if ( !scene || !crewActor || !entry ) return;
+  const tok = scene.tokens.find(t => (t.actorId === crewActor.id) && !t.getFlag(MODULE_ID, "mishapEntry"));
+  const card = blockRect(scene, entry.system);
+  if ( !tok || !card ) return;
+  const grid = scene.grid.size, w = tok.width * grid;
+  // Crew already working on this card stand side by side above the Mishap row.
+  const here = scene.tokens.filter(t => t.getFlag(MODULE_ID, "crewHome") && (t.id !== tok.id)
+    && (blockAt(scene, { x: t.x + t.width * grid / 2, y: t.y + t.height * grid / 2 }) === entry.system)).length;
+  const x = card.x + Math.min(card.w - w, 0.08 * card.w + here * (w * 0.75));
+  const y = card.y + 0.28 * card.w;
+  const home = tok.getFlag(MODULE_ID, "crewHome") ?? { x: tok.x, y: tok.y, shipUuid: ship.uuid };
+  await tok.update({ x, y, [`flags.${MODULE_ID}.crewHome`]: home });
+}
+
+/** Send every crew token that left its station back to it (GM). */
+export async function crewHome(ship) {
+  const scene = bridgeOf(ship);
+  if ( !scene ) return;
+  const back = scene.tokens.filter(t => t.getFlag(MODULE_ID, "crewHome")).map(t => {
+    const h = t.getFlag(MODULE_ID, "crewHome");
+    return { _id: t.id, x: h.x, y: h.y, [`flags.${MODULE_ID}.-=crewHome`]: null };
+  });
+  if ( back.length ) await scene.updateEmbeddedDocuments("Token", back);
+}

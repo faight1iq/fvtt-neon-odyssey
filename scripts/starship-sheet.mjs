@@ -63,7 +63,8 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       removeMishap: StarshipSheet.#onRemoveMishap,
       recalculate: StarshipSheet.#onRecalculate,
       editShipImage: StarshipSheet.#onEditShipImage,
-      rearm: StarshipSheet.#onRearm
+      rearm: StarshipSheet.#onRearm,
+      removeCrew: StarshipSheet.#onRemoveCrew
     }
   };
 
@@ -243,6 +244,8 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       name: actor.name, priceLabel, line1, line2,
       shipLevel: Math.max(1, Math.floor(Number(flags.level) || 1)),
       shipProf: Math.ceil(Math.max(1, Math.floor(Number(flags.level) || 1)) / 4) + 1,
+      crewItem: (() => { const it = actor.items.find(i => (i.flags?.[MODULE_ID]?.crewQuality ?? null) !== null);
+        return it ? { id: it.id, name: it.name, q: Number(it.flags[MODULE_ID].crewQuality) } : null; })(),
       crewLabel: designed ? `${crew}${pax ? ` + ${pax} passengers` : ""}${analysis ? `, ${analysis.berths} berths` : ""}` : `${crew}/${crew + pax}`,
       cargo: designed ? (flags.cargo ? `${Number(flags.cargo).toLocaleString()}` : "")
         : (flags.cargoSqft ? `${Number(flags.cargoSqft).toLocaleString()} sqft` : ""),
@@ -378,8 +381,16 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
         await addComponent(this.actor, item);
         return;
       }
+      // A Crew item (Crew: Green / Regular / Veteran / Elite) sets the crew quality; one per ship (John, 2026-10-26).
+      if ( (item.flags[MODULE_ID]?.crewQuality ?? null) !== null ) {
+        const old = this.actor.items.filter(i => (i.flags?.[MODULE_ID]?.crewQuality ?? null) !== null).map(i => i.id);
+        if ( old.length ) await this.actor.deleteEmbeddedDocuments("Item", old);
+        await this.actor.createEmbeddedDocuments("Item", [item.toObject()]);
+        ui.notifications.info(`${this.actor.name}: ${item.name} aboard (crew quality +${item.flags[MODULE_ID].crewQuality}).`);
+        return;
+      }
       if ( item.type !== "weapon" ) {
-        ui.notifications.warn("Only weapons can be added as Weapon Stations on this sheet.");
+        ui.notifications.warn("Only weapons, ship components and Crew items can be dropped on this sheet.");
         return;
       }
       await this.actor.createEmbeddedDocuments("Item", [item.toObject()]);
@@ -464,6 +475,11 @@ export class StarshipSheet extends HandlebarsApplicationMixin(ActorSheetV2) {
       }
     });
     return picker.browse();
+  }
+
+  static async #onRemoveCrew(event, target) {
+    const id = target.closest("[data-crew-id]")?.dataset.crewId;
+    if ( id ) await this.actor.deleteEmbeddedDocuments("Item", [id]);
   }
 
   static async #onRearm() {

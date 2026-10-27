@@ -90,6 +90,7 @@
   {{#if designed}}
   <div class="no-ss-stats">
     <div class="l">Crew</div><div class="v full">{{crewLabel}}</div>
+    {{#if crewItem}}<div class="l">Crew Quality</div><div class="v full" data-crew-id="{{crewItem.id}}">{{crewItem.name}} (+{{crewItem.q}}){{#if owner}} <a data-action="removeCrew" data-tooltip="Remove this Crew item (back to the ship's crew bonus settings)"><i class="fa-solid fa-xmark"></i></a>{{/if}}</div>{{else}}{{#if owner}}<div class="l">Crew Quality</div><div class="v full sub">Default (drop a Crew item here)</div>{{/if}}{{/if}}
     <div class="l">Cargo</div><div class="v full">{{cargo}}{{#if prisoners}} <span class="sub">· {{prisoners}} prisoners</span>{{/if}}</div>
     <div class="l">Armor Class</div><div class="v full">{{ac}}{{#if analysis.acrobatics}} <span class="sub">· Acrobatics {{analysis.acrobatics}}</span>{{/if}}</div>
     {{#if shieldLine}}<div class="l">Shields</div><div class="v full">{{shieldLine}}</div>{{/if}}
@@ -151,6 +152,7 @@
   <div class="no-ss-rule"></div>
   <div class="no-ss-stats">
     <div class="l">Crew</div><div class="v">{{crewLabel}}</div>
+    {{#if crewItem}}<div class="l">Crew Quality</div><div class="v full" data-crew-id="{{crewItem.id}}">{{crewItem.name}} (+{{crewItem.q}}){{#if owner}} <a data-action="removeCrew" data-tooltip="Remove this Crew item (back to the ship's crew bonus settings)"><i class="fa-solid fa-xmark"></i></a>{{/if}}</div>{{else}}{{#if owner}}<div class="l">Crew Quality</div><div class="v full sub">Default (drop a Crew item here)</div>{{/if}}{{/if}}
     <div class="l">Cargo</div><div class="v">{{cargo}}</div>
     <div class="l">Armor Class</div><div class="v full">{{ac}}</div>
     {{#if shieldLine}}<div class="l">Shields</div><div class="v full">{{shieldLine}}</div>{{/if}}
